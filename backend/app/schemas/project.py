@@ -1,0 +1,70 @@
+from datetime import datetime
+from typing import Optional, Any
+from pydantic import BaseModel
+
+
+class ProjectCreate(BaseModel):
+    name: str
+    description: str
+    domain: Optional[str] = None
+    goals: Optional[str] = None
+
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    domain: Optional[str] = None
+    goals: Optional[str] = None
+    settings: Optional[dict[str, Any]] = None
+
+
+class ProjectOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    domain: Optional[str]
+    goals: Optional[str]
+    initial_structure: Optional[dict[str, Any]]
+    settings: Optional[dict[str, Any]]
+    created_by: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DigestOut(BaseModel):
+    id: int
+    project_id: int
+    title: str
+    content: str
+    period_start: datetime
+    period_end: datetime
+    new_references: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DigestCreate(BaseModel):
+    period_start: datetime
+    period_end: datetime
+    model: str = "claude-sonnet-4-6"
+
+
+class WatchRequestCreate(BaseModel):
+    description: str
+    keywords: Optional[str] = None
+    source_types: Optional[str] = None
+
+
+class WatchRequestOut(BaseModel):
+    id: int
+    project_id: int
+    user_id: int
+    description: str
+    keywords: Optional[str]
+    source_types: Optional[str]
+    status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

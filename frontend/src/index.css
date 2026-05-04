@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-gray-50 text-gray-900 font-sans antialiased;
+  }
+  ::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 rounded-full;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-4 py-2 bg-alexandria-600 text-white text-sm font-medium rounded-lg hover:bg-alexandria-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 px-3 py-1.5 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-100 transition-colors;
+  }
+  .card {
+    @apply bg-white rounded-xl border border-gray-100 shadow-sm;
+  }
+  .input {
+    @apply w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-alexandria-500 focus:border-transparent transition-shadow;
+  }
+  .label {
+    @apply block text-sm font-medium text-gray-700 mb-1;
+  }
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+}
+
+/* Markdown prose styles for Alexandria chat */
+.prose-alexandria h1, .prose-alexandria h2, .prose-alexandria h3 {
+  @apply font-semibold text-gray-900 mt-4 mb-2;
+}
+.prose-alexandria h1 { @apply text-lg; }
+.prose-alexandria h2 { @apply text-base; }
+.prose-alexandria h3 { @apply text-sm; }
+.prose-alexandria p { @apply text-sm text-gray-700 mb-3 leading-relaxed; }
+.prose-alexandria ul, .prose-alexandria ol { @apply text-sm text-gray-700 mb-3 pl-4; }
+.prose-alexandria li { @apply mb-1; }
+.prose-alexandria ul li { @apply list-disc; }
+.prose-alexandria ol li { @apply list-decimal; }
+.prose-alexandria strong { @apply font-semibold text-gray-900; }
+.prose-alexandria code { @apply bg-gray-100 px-1 py-0.5 rounded text-xs font-mono; }
+.prose-alexandria hr { @apply border-gray-200 my-4; }

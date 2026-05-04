@@ -1,0 +1,177 @@
+from fastapi import APIRouter, HTTPException
+from sqlalchemy import select
+
+from app.dependencies import DB, CurrentUser
+from app.models.project import Project, Digest, WatchRequest
+from app.models.collection import Collection
+from app.schemas.project import (
+    ProjectCreate, ProjectUpdate, ProjectOut,
+    DigestCreate, DigestOut,
+    WatchRequestCreate, WatchRequestOut,
+)
+from app.services.project_setup import generate_initial_structure, suggest_restructure
+from app.services.digest import generate_digest
+
+router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+@router.post("", response_model=ProjectOut, status_code=201)
+async def create_project(data: ProjectCreate, db: DB, current_user: CurrentUser):
+    structure = await generate_initial_structure(
+        name=data.name,
+        description=data.description,
+        domain=data.domain or "",
+        goals=data.goals or "",
+    )
+
+    project = Project(
+        name=data.name,
+        description=data.description,
+        domain=data.domain,
+        goals=data.goals,
+        initial_structure=structure,
+        created_by=current_user.id,
+    )
+    db.add(project)
+    await db.flush()
+
+    for col_data in structure.get("collections", []):
+        parent = Collection(
+            name=col_data["name"],
+            description=col_data.get("description"),
+            project_id=project.id,
+            created_by=current_user.id,
+            path="/",
+        )
+        db.add(parent)
+        await db.flush()
+        parent.path = f"/{parent.id}/"
+
+        for child_data in col_data.get("children", []):
+            child = Collection(
+                name=child_data["name"],
+                description=child_data.get("description"),
+                project_id=project.id,
+                parent_id=parent.id,
+                created_by=current_user.id,
+                path=f"/{parent.id}/",
+            )
+            db.add(child)
+            await db.flush()
+            child.path = f"/{parent.id}/{child.id}/"
+
+    await db.flush()
+    await db.refresh(project)
+    return project
+
+
+@router.get("", response_model=list[ProjectOut])
+async def list_projects(db: DB, current_user: CurrentUser):
+    result = await db.execute(select(Project).order_by(Project.created_at.desc()))
+    return result.scalars().all()
+
+
+@router.get("/{project_id}", response_model=ProjectOut)
+async def get_project(project_id: int, db: DB, current_user: CurrentUser):
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@router.patch("/{project_id}", response_model=ProjectOut)
+async def update_project(project_id: int, data: ProjectUpdate, db: DB, current_user: CurrentUser):
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    for field, val in data.model_dump(exclude_none=True).items():
+        setattr(project, field, val)
+    await db.flush()
+    await db.refresh(project)
+    return project
+
+
+@router.post("/{project_id}/restructure-suggestions", response_model=dict)
+async def restructure_suggestions(project_id: int, db: DB, current_user: CurrentUser):
+    from app.models.reference import Reference
+    from sqlalchemy.orm import selectinload
+
+    project_result = await db.execute(select(Project).where(Project.id == project_id))
+    project = project_result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    cols_result = await db.execute(select(Collection).where(Collection.project_id == project_id))
+    collections = [{"id": c.id, "name": c.name, "parent_id": c.parent_id} for c in cols_result.scalars().all()]
+
+    refs_result = await db.execute(
+        select(Reference)
+        .options(selectinload(Reference.tags))
+        .where(Reference.project_id == project_id)
+        .order_by(Reference.created_at.desc())
+        .limit(30)
+    )
+    refs = [
+        {"title": r.title, "source_type": r.source_type, "collection_id": r.collection_id, "tags": [t.tag for t in r.tags]}
+        for r in refs_result.scalars().all()
+    ]
+
+    return await suggest_restructure(project.name, collections, refs)
+
+
+@router.post("/{project_id}/digests", response_model=DigestOut, status_code=201)
+async def create_digest(project_id: int, data: DigestCreate, db: DB, current_user: CurrentUser):
+    return await generate_digest(
+        db=db,
+        project_id=project_id,
+        user_id=current_user.id,
+        period_start=data.period_start,
+        period_end=data.period_end,
+        model=data.model,
+    )
+
+
+@router.get("/{project_id}/digests", response_model=list[DigestOut])
+async def list_digests(project_id: int, db: DB, current_user: CurrentUser):
+    result = await db.execute(
+        select(Digest)
+        .where(Digest.project_id == project_id)
+        .order_by(Digest.created_at.desc())
+    )
+    return result.scalars().all()
+
+
+@router.get("/{project_id}/digests/{digest_id}", response_model=DigestOut)
+async def get_digest(project_id: int, digest_id: int, db: DB, current_user: CurrentUser):
+    result = await db.execute(
+        select(Digest).where(Digest.project_id == project_id, Digest.id == digest_id)
+    )
+    digest = result.scalar_one_or_none()
+    if not digest:
+        raise HTTPException(status_code=404, detail="Digest not found")
+    return digest
+
+
+@router.post("/{project_id}/watch-requests", response_model=WatchRequestOut, status_code=201)
+async def create_watch_request(project_id: int, data: WatchRequestCreate, db: DB, current_user: CurrentUser):
+    req = WatchRequest(
+        project_id=project_id,
+        user_id=current_user.id,
+        **data.model_dump(),
+    )
+    db.add(req)
+    await db.flush()
+    await db.refresh(req)
+    return req
+
+
+@router.get("/{project_id}/watch-requests", response_model=list[WatchRequestOut])
+async def list_watch_requests(project_id: int, db: DB, current_user: CurrentUser):
+    result = await db.execute(
+        select(WatchRequest)
+        .where(WatchRequest.project_id == project_id)
+        .order_by(WatchRequest.created_at.desc())
+    )
+    return result.scalars().all()
