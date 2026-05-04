@@ -155,7 +155,7 @@ export default function Library() {
             {searchQ ? `${displayRefs.length} results` : `${displayRefs.length} references`}
           </p>
           <div className="grid grid-cols-1 gap-3">
-            {displayRefs.map(r => <ReferenceCard key={r.id} ref={r} />)}
+            {displayRefs.map(r => <ReferenceCard key={r.id} reference={r} />)}
           </div>
         </div>
       )}

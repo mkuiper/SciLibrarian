@@ -12,7 +12,7 @@ const TYPE_CONFIG = {
   other:       { icon: Globe,        color: 'bg-gray-50 text-gray-600',    label: 'Other' },
 }
 
-export default function ReferenceCard({ ref: r }) {
+export default function ReferenceCard({ reference: r }) {
   const navigate = useNavigate()
   const config = TYPE_CONFIG[r.source_type] || TYPE_CONFIG.other
   const Icon = config.icon
