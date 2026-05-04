@@ -6,16 +6,12 @@ import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
 
 const FREQUENCIES = ['daily', 'weekly']
-const SOURCES = [
-  { id: 'arxiv', label: 'arXiv' },
-  { id: 'semantic_scholar', label: 'Semantic Scholar' },
-]
 
 function MonitorForm({ onClose }) {
   const [form, setForm] = useState({
     name: '',
     query: '',
-    sources: 'arxiv,semantic_scholar',
+    sources: 'arxiv,semantic_scholar,openalex',
     frequency: 'weekly',
   })
   const [loading, setLoading] = useState(false)
@@ -59,9 +55,12 @@ function MonitorForm({ onClose }) {
           <div>
             <label className="label">Sources</label>
             <select className="input" value={form.sources} onChange={e => setForm(f => ({ ...f, sources: e.target.value }))}>
+              <option value="arxiv,semantic_scholar,openalex">All sources (recommended)</option>
+              <option value="arxiv,openalex">arXiv + OpenAlex</option>
               <option value="arxiv,semantic_scholar">arXiv + Semantic Scholar</option>
               <option value="arxiv">arXiv only</option>
               <option value="semantic_scholar">Semantic Scholar only</option>
+              <option value="openalex">OpenAlex only</option>
             </select>
           </div>
         </div>

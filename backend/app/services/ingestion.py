@@ -1,19 +1,15 @@
-import os
+import json
 import uuid
 from pathlib import Path
 from typing import Optional
 
-import anthropic
 import httpx
 from bs4 import BeautifulSoup
 
 from app.config import settings
+from app.services.llm import complete_text
 
 SOURCE_TYPES = ["paper", "policy", "model_card", "evaluation", "government", "news", "other"]
-
-
-def _anthropic_client() -> anthropic.AsyncAnthropic:
-    return anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 
 async def extract_pdf_text(file_bytes: bytes) -> str:
@@ -26,7 +22,7 @@ async def extract_pdf_text(file_bytes: bytes) -> str:
 
 async def extract_url_text(url: str) -> tuple[str, str]:
     async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
-        resp = await client.get(url, headers={"User-Agent": "SciLibrarian/1.0"})
+        resp = await client.get(url, headers={"User-Agent": "SciLibrarian/1.0 (research tool)"})
         resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "lxml")
     for tag in soup(["script", "style", "nav", "footer", "header"]):
@@ -37,7 +33,6 @@ async def extract_url_text(url: str) -> tuple[str, str]:
 
 
 async def generate_metadata(text: str, title: str, model: str = "claude-sonnet-4-6") -> dict:
-    client = _anthropic_client()
     prompt = f"""Analyse this document and extract structured metadata. Return valid JSON only, no markdown fences.
 
 Title hint: {title}
@@ -52,16 +47,11 @@ Return JSON with these fields:
 - source_type: one of {SOURCE_TYPES}
 - abstract: string (2-3 sentence abstract or description)
 - summary: string (concise 5-7 sentence summary of key points and relevance to AI safety)
-- tags: array of strings (5-10 relevant topic tags, lowercase)
+- tags: array of strings (5-10 relevant topic tags, lowercase, no spaces)
 - extra_metadata: object with any other relevant fields (journal, doi, institution, etc.)"""
 
-    message = await client.messages.create(
-        model=model,
-        max_tokens=1500,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    import json
-    raw = message.content[0].text.strip()
+    raw = await complete_text(model, prompt, max_tokens=1500)
+    raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):

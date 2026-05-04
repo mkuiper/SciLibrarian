@@ -7,7 +7,7 @@ import CollectionTree from './CollectionTree'
 import {
   BookOpen, LayoutDashboard, Inbox, Radio, FileText,
   Plus, ChevronDown, ChevronRight, LogOut, FolderPlus,
-  Sparkles,
+  Sparkles, Settings, Eye,
 } from 'lucide-react'
 
 const navItem = 'flex items-center gap-2.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors'
@@ -40,58 +40,36 @@ export default function Sidebar() {
           </div>
           <div>
             <p className="text-white font-semibold text-sm">SciLibrarian</p>
-            <p className="text-slate-400 text-xs">powered by Alexandria</p>
+            <p className="text-slate-400 text-xs">Alexandria</p>
           </div>
         </div>
       </div>
 
       {currentProject && (
         <div className="px-4 py-3 border-b border-slate-700">
-          <p className="text-slate-500 text-xs uppercase tracking-wider mb-1">Active Project</p>
+          <p className="text-slate-500 text-xs uppercase tracking-wider mb-0.5">Project</p>
           <p className="text-slate-200 text-sm font-medium truncate">{currentProject.name}</p>
         </div>
       )}
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-        <NavLink
-          to="/"
-          end
-          className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}
-        >
-          <LayoutDashboard size={16} />
-          Dashboard
+      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
+        <NavLink to="/" end className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
+          <LayoutDashboard size={16} />Dashboard
         </NavLink>
-
-        <NavLink
-          to="/library"
-          className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}
-        >
-          <BookOpen size={16} />
-          Library
+        <NavLink to="/library" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
+          <BookOpen size={16} />Library
         </NavLink>
-
-        <NavLink
-          to="/review"
-          className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}
-        >
-          <Inbox size={16} />
-          Review Queue
+        <NavLink to="/review" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
+          <Inbox size={16} />Review Queue
         </NavLink>
-
-        <NavLink
-          to="/monitors"
-          className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}
-        >
-          <Radio size={16} />
-          Monitors
+        <NavLink to="/monitors" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
+          <Radio size={16} />Monitors
         </NavLink>
-
-        <NavLink
-          to="/digests"
-          className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}
-        >
-          <Sparkles size={16} />
-          Monthly Digest
+        <NavLink to="/watch-requests" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
+          <Eye size={16} />Watch Requests
+        </NavLink>
+        <NavLink to="/digests" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
+          <Sparkles size={16} />Monthly Digest
         </NavLink>
 
         <div className="pt-4">
@@ -122,16 +100,18 @@ export default function Sidebar() {
         </div>
       </nav>
 
-      <div className="px-3 py-4 border-t border-slate-700 space-y-1">
+      <div className="px-3 py-4 border-t border-slate-700 space-y-0.5">
         <button
           onClick={() => navigate('/projects/new')}
           className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg transition-colors"
         >
-          <Plus size={16} />
-          New Project
+          <Plus size={16} />New Project
         </button>
+        <NavLink to="/settings" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
+          <Settings size={16} />Settings
+        </NavLink>
 
-        <div className="flex items-center justify-between px-3 py-2">
+        <div className="flex items-center justify-between px-3 py-2 mt-1">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-7 h-7 rounded-full bg-slate-600 flex items-center justify-center text-white text-xs font-medium flex-shrink-0">
               {user?.name?.[0]?.toUpperCase()}

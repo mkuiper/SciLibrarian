@@ -1,9 +1,21 @@
+"""
+Proactive search sources for Alexandria's monitors.
+
+Free sources (no API key required):
+  - arXiv: Preprints in physics, CS, maths, etc. Great for AI/ML papers.
+  - Semantic Scholar: 200M+ academic papers. Free, rate-limited without key.
+  - OpenAlex: 250M+ open scholarly works. Free, generous rate limit with email.
+
+Optional (require API keys in .env):
+  - SEMANTIC_SCHOLAR_API_KEY: increases rate limit to 100 req/sec
+  - OPENALEX_EMAIL: increases rate limit (polite pool), add to .env
+"""
 import httpx
 from datetime import datetime, timezone
-from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.search_monitor import SearchMonitor
 from app.models.review_queue import ReviewQueueItem
 
@@ -21,7 +33,7 @@ async def search_arxiv(query: str, max_results: int = 10) -> list[dict]:
         resp.raise_for_status()
 
     import xml.etree.ElementTree as ET
-    ns = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
     root = ET.fromstring(resp.text)
     results = []
     for entry in root.findall("atom:entry", ns):
@@ -29,21 +41,23 @@ async def search_arxiv(query: str, max_results: int = 10) -> list[dict]:
         summary_el = entry.find("atom:summary", ns)
         published_el = entry.find("atom:published", ns)
         link_el = entry.find("atom:id", ns)
-        authors = [a.find("atom:name", ns).text for a in entry.findall("atom:author", ns)]
-
+        authors = [
+            a.find("atom:name", ns).text
+            for a in entry.findall("atom:author", ns)
+            if a.find("atom:name", ns) is not None
+        ]
         year = None
         if published_el is not None and published_el.text:
             try:
                 year = int(published_el.text[:4])
             except ValueError:
                 pass
-
         results.append({
-            "title": title_el.text.strip() if title_el is not None else "",
-            "abstract": summary_el.text.strip() if summary_el is not None else "",
+            "title": (title_el.text or "").strip(),
+            "abstract": (summary_el.text or "").strip(),
             "authors": ", ".join(authors),
             "year": year,
-            "url": link_el.text.strip() if link_el is not None else "",
+            "url": (link_el.text or "").strip(),
             "source": "arxiv",
         })
     return results
@@ -56,14 +70,17 @@ async def search_semantic_scholar(query: str, max_results: int = 10) -> list[dic
         "limit": max_results,
         "fields": "title,abstract,authors,year,externalIds,openAccessPdf",
     }
+    headers = {}
+    if settings.semantic_scholar_api_key:
+        headers["x-api-key"] = settings.semantic_scholar_api_key
+
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(url, params=params)
+        resp = await client.get(url, params=params, headers=headers)
         if resp.status_code != 200:
             return []
 
-    data = resp.json()
     results = []
-    for paper in data.get("data", []):
+    for paper in resp.json().get("data", []):
         pdf_url = None
         if paper.get("openAccessPdf"):
             pdf_url = paper["openAccessPdf"].get("url")
@@ -80,27 +97,93 @@ async def search_semantic_scholar(query: str, max_results: int = 10) -> list[dic
     return results
 
 
+async def search_openalex(query: str, max_results: int = 10) -> list[dict]:
+    """
+    OpenAlex is a free, open catalogue of 250M+ scholarly works.
+    No API key required. Set OPENALEX_EMAIL in .env to use the polite pool
+    (much higher rate limits).
+
+    Docs: https://docs.openalex.org/
+    """
+    url = "https://api.openalex.org/works"
+    params = {
+        "search": query,
+        "per-page": max_results,
+        "sort": "publication_date:desc",
+        "select": "id,title,abstract_inverted_index,authorships,publication_year,doi,open_access",
+    }
+    if settings.openalex_email:
+        params["mailto"] = settings.openalex_email
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(url, params=params, headers={"User-Agent": "SciLibrarian/1.0"})
+        if resp.status_code != 200:
+            return []
+
+    results = []
+    for work in resp.json().get("results", []):
+        title = work.get("title", "")
+        if not title:
+            continue
+
+        abstract = _reconstruct_abstract(work.get("abstract_inverted_index"))
+
+        authors = ", ".join(
+            a.get("author", {}).get("display_name", "")
+            for a in (work.get("authorships") or [])[:5]
+        )
+
+        doi = work.get("doi", "")
+        oa_url = (work.get("open_access") or {}).get("oa_url")
+        url_out = oa_url or (doi if doi.startswith("http") else f"https://doi.org/{doi.lstrip('https://doi.org/')}" if doi else None)
+
+        results.append({
+            "title": title,
+            "abstract": abstract or "",
+            "authors": authors,
+            "year": work.get("publication_year"),
+            "url": url_out,
+            "source": "openalex",
+            "extra_metadata": {"openalex_id": work.get("id"), "doi": doi},
+        })
+    return results
+
+
+def _reconstruct_abstract(inverted_index: dict | None) -> str:
+    """OpenAlex stores abstracts as inverted indices; reconstruct the text."""
+    if not inverted_index:
+        return ""
+    positions: dict[int, str] = {}
+    for word, locs in inverted_index.items():
+        for pos in locs:
+            positions[pos] = word
+    return " ".join(positions[i] for i in sorted(positions))
+
+
+SOURCES = {
+    "arxiv": search_arxiv,
+    "semantic_scholar": search_semantic_scholar,
+    "openalex": search_openalex,
+}
+
+
 async def run_monitor(db: AsyncSession, monitor: SearchMonitor) -> int:
     all_results = []
     sources = [s.strip() for s in monitor.sources.split(",")]
 
-    if "arxiv" in sources:
-        try:
-            all_results.extend(await search_arxiv(monitor.query))
-        except Exception:
-            pass
-
-    if "semantic_scholar" in sources:
-        try:
-            all_results.extend(await search_semantic_scholar(monitor.query))
-        except Exception:
-            pass
+    for source_name in sources:
+        fn = SOURCES.get(source_name)
+        if fn:
+            try:
+                all_results.extend(await fn(monitor.query))
+            except Exception:
+                pass
 
     added = 0
     for item in all_results:
         if not item.get("title"):
             continue
-        queue_item = ReviewQueueItem(
+        db.add(ReviewQueueItem(
             title=item["title"],
             url=item.get("url"),
             source=item["source"],
@@ -110,8 +193,8 @@ async def run_monitor(db: AsyncSession, monitor: SearchMonitor) -> int:
             authors=item.get("authors"),
             year=item.get("year"),
             status="pending",
-        )
-        db.add(queue_item)
+            extra_metadata=item.get("extra_metadata"),
+        ))
         added += 1
 
     monitor.last_run = datetime.now(timezone.utc)

@@ -1,8 +1,10 @@
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// All requests go through the Vite proxy (/api → backend).
+// This works in Docker (proxy targets internal network) and locally.
+const BASE = '/api'
 
-export const api = axios.create({ baseURL: API_URL })
+export const api = axios.create({ baseURL: BASE })
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
@@ -33,6 +35,7 @@ export const projectsApi = {
   get: (id) => api.get(`/projects/${id}`),
   create: (data) => api.post('/projects', data),
   update: (id, data) => api.patch(`/projects/${id}`, data),
+  updateSettings: (id, data) => api.patch(`/projects/${id}/settings`, data),
   restructureSuggestions: (id) => api.post(`/projects/${id}/restructure-suggestions`),
   listDigests: (id) => api.get(`/projects/${id}/digests`),
   createDigest: (id, data) => api.post(`/projects/${id}/digests`, data),
@@ -53,12 +56,15 @@ export const collectionsApi = {
 export const referencesApi = {
   list: (params) => api.get('/references', { params }),
   get: (id) => api.get(`/references/${id}`),
+  stats: (params) => api.get('/references/stats/summary', { params }),
   uploadPdf: (formData) => api.post('/references/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }),
   fromUrl: (url, params) => api.post('/references/from-url', null, { params: { url, ...params } }),
   update: (id, data) => api.patch(`/references/${id}`, data),
   delete: (id) => api.delete(`/references/${id}`),
+  fileUrl: (id) => `${BASE}/references/${id}/file`,
+  bibtexUrl: (id) => `${BASE}/references/${id}/bibtex`,
 }
 
 export const searchApi = {
@@ -76,15 +82,16 @@ export const reviewApi = {
 }
 
 export const librarianApi = {
-  chat: async (messages, model = 'claude-sonnet-4-6', onChunk) => {
+  models: () => api.get('/librarian/models'),
+  chat: async (messages, model = 'claude-sonnet-4-6', projectId, onChunk) => {
     const token = localStorage.getItem('token')
-    const response = await fetch(`${API_URL}/librarian/chat`, {
+    const response = await fetch(`${BASE}/librarian/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ messages, model }),
+      body: JSON.stringify({ messages, model, project_id: projectId }),
     })
     if (!response.ok) throw new Error('Chat request failed')
     const reader = response.body.getReader()

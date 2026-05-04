@@ -1,4 +1,6 @@
+from typing import Any
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.dependencies import DB, CurrentUser
@@ -175,3 +177,30 @@ async def list_watch_requests(project_id: int, db: DB, current_user: CurrentUser
         .order_by(WatchRequest.created_at.desc())
     )
     return result.scalars().all()
+
+
+class ProjectSettingsUpdate(BaseModel):
+    librarian_model: str | None = None
+    ingestion_model: str | None = None
+    librarian_system_prompt: str | None = None
+    ollama_base_url: str | None = None
+
+
+@router.patch("/{project_id}/settings", response_model=ProjectOut)
+async def update_project_settings(
+    project_id: int, data: ProjectSettingsUpdate, db: DB, current_user: CurrentUser
+):
+    """Update AI model and prompt settings for a project."""
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    current = dict(project.settings or {})
+    for field, val in data.model_dump(exclude_none=True).items():
+        current[field] = val
+    project.settings = current
+
+    await db.flush()
+    await db.refresh(project)
+    return project

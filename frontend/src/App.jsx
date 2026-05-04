@@ -10,6 +10,8 @@ import ReviewQueue from './pages/ReviewQueue'
 import Monitors from './pages/Monitors'
 import DigestPage from './pages/DigestPage'
 import ReferencePage from './pages/ReferencePage'
+import Settings from './pages/Settings'
+import WatchRequests from './pages/WatchRequests'
 
 function PrivateRoute({ children }) {
   const { user } = useAuth()
@@ -38,7 +40,9 @@ export default function App() {
             <Route path="projects/new" element={<ProjectSetup />} />
             <Route path="review" element={<ReviewQueue />} />
             <Route path="monitors" element={<Monitors />} />
+            <Route path="watch-requests" element={<WatchRequests />} />
             <Route path="digests" element={<DigestPage />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>
       </BrowserRouter>

@@ -1,6 +1,8 @@
+from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
-from sqlalchemy import select
+from fastapi.responses import FileResponse, PlainTextResponse
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
@@ -158,3 +160,80 @@ async def delete_reference(ref_id: int, db: DB, current_user: CurrentUser):
     if not ref:
         raise HTTPException(status_code=404, detail="Reference not found")
     await db.delete(ref)
+
+
+@router.get("/{ref_id}/file")
+async def serve_file(ref_id: int, db: DB, current_user: CurrentUser):
+    """Serve the uploaded PDF file for in-browser viewing."""
+    result = await db.execute(select(Reference).where(Reference.id == ref_id))
+    ref = result.scalar_one_or_none()
+    if not ref or not ref.file_path:
+        raise HTTPException(status_code=404, detail="No file attached to this reference")
+    path = Path(ref.file_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=ref.file_name or path.name,
+        headers={"Content-Disposition": "inline"},
+    )
+
+
+@router.get("/{ref_id}/bibtex", response_class=PlainTextResponse)
+async def export_bibtex(ref_id: int, db: DB, current_user: CurrentUser):
+    """Export reference as BibTeX."""
+    result = await db.execute(select(Reference).where(Reference.id == ref_id))
+    ref = result.scalar_one_or_none()
+    if not ref:
+        raise HTTPException(status_code=404, detail="Reference not found")
+    return _to_bibtex(ref)
+
+
+@router.get("/stats/summary")
+async def stats(db: DB, current_user: CurrentUser, project_id: Optional[int] = None):
+    """Aggregate counts for dashboard."""
+    stmt = select(func.count(Reference.id))
+    if project_id:
+        stmt = stmt.where(Reference.project_id == project_id)
+    total = (await db.execute(stmt)).scalar_one()
+
+    by_type_rows = await db.execute(
+        select(Reference.source_type, func.count(Reference.id))
+        .group_by(Reference.source_type)
+    )
+    by_type = {row[0]: row[1] for row in by_type_rows}
+
+    return {"total": total, "by_type": by_type}
+
+
+def _to_bibtex(ref: Reference) -> str:
+    authors = ref.authors or "Unknown"
+    year = str(ref.year) if ref.year else "nd"
+    first_author_last = authors.split(",")[0].strip().split()[-1] if authors else "Unknown"
+    key = f"{first_author_last}{year}"
+
+    entry_type = {
+        "paper": "article",
+        "policy": "techreport",
+        "model_card": "misc",
+        "evaluation": "techreport",
+        "government": "techreport",
+        "other": "misc",
+    }.get(ref.source_type, "misc")
+
+    lines = [
+        f"@{entry_type}{{{key},",
+        f'  title = {{{ref.title}}},',
+        f'  author = {{{authors}}},',
+        f'  year = {{{year}}},',
+    ]
+    if ref.url:
+        lines.append(f'  url = {{{ref.url}}},')
+    if ref.extra_metadata:
+        if ref.extra_metadata.get("doi"):
+            lines.append(f'  doi = {{{ref.extra_metadata["doi"]}}},')
+        if ref.extra_metadata.get("journal"):
+            lines.append(f'  journal = {{{ref.extra_metadata["journal"]}}},')
+    lines.append("}")
+    return "\n".join(lines)

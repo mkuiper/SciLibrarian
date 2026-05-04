@@ -25,7 +25,13 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-scilibrarian}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-scilibrarian}
       SECRET_KEY: ${SECRET_KEY:-dev-secret-key}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      VLLM_BASE_URL: ${VLLM_BASE_URL:-}
+      SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:-}
+      OPENALEX_EMAIL: ${OPENALEX_EMAIL:-}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       UPLOAD_DIR: /app/uploads
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
@@ -36,6 +42,9 @@ services:
       db:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    extra_hosts:
+      # Allows backend to reach Ollama running on the host machine
+      - "host.docker.internal:host-gateway"
 
   frontend:
     build:
@@ -44,11 +53,14 @@ services:
     ports:
       - "5173:5173"
     environment:
-      VITE_API_URL: http://localhost:8000
+      # Vite proxy target: backend on Docker internal network
+      BACKEND_URL: http://backend:8000
     volumes:
       - ./frontend:/app
       - /app/node_modules
     command: npm run dev -- --host
+    depends_on:
+      - backend
 
 volumes:
   postgres_data:

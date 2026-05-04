@@ -1,14 +1,8 @@
 import { useState, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { referencesApi } from '../api/client'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { referencesApi, librarianApi, projectsApi } from '../api/client'
 import { X, Upload, Link, Loader2, FileText } from 'lucide-react'
 import toast from 'react-hot-toast'
-
-const MODELS = [
-  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6 (recommended)' },
-  { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 (faster)' },
-  { value: 'claude-opus-4-7', label: 'Opus 4.7 (most thorough)' },
-]
 
 export default function AddReferenceModal({ onClose, collectionId }) {
   const [tab, setTab] = useState('pdf')
@@ -18,6 +12,25 @@ export default function AddReferenceModal({ onClose, collectionId }) {
   const [loading, setLoading] = useState(false)
   const fileRef = useRef()
   const queryClient = useQueryClient()
+
+  const { data: modelGroups = {} } = useQuery({
+    queryKey: ['librarian-models'],
+    queryFn: () => librarianApi.models().then(r => r.data),
+  })
+
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => projectsApi.list().then(r => r.data),
+  })
+
+  const projectIngestionModel = projects[0]?.settings?.ingestion_model
+  const effectiveModel = model === 'claude-sonnet-4-6' && projectIngestionModel
+    ? projectIngestionModel
+    : model
+
+  const allModels = Object.entries(modelGroups).flatMap(([provider, ms]) =>
+    ms.map(m => ({ ...m, provider }))
+  )
 
   const handleFile = (e) => {
     const f = e.target.files?.[0]
@@ -114,8 +127,23 @@ export default function AddReferenceModal({ onClose, collectionId }) {
           <div className="mt-4">
             <label className="label">Processing model</label>
             <select value={model} onChange={e => setModel(e.target.value)} className="input">
-              {MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              {allModels.length > 0
+                ? Object.entries(modelGroups).map(([provider, ms]) => (
+                    <optgroup key={provider} label={provider}>
+                      {ms.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    </optgroup>
+                  ))
+                : (
+                  <>
+                    <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+                    <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (faster)</option>
+                  </>
+                )
+              }
             </select>
+            {projectIngestionModel && projectIngestionModel !== model && (
+              <p className="text-xs text-gray-400 mt-1">Project default: {projectIngestionModel}</p>
+            )}
           </div>
         </div>
 

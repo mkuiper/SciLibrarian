@@ -7,8 +7,10 @@ export default defineConfig({
     host: true,
     port: 5173,
     proxy: {
+      // All /api/* requests are proxied to the backend.
+      // BACKEND_URL is set in docker-compose; defaults to localhost for local dev.
       '/api': {
-        target: 'http://backend:8000',
+        target: process.env.BACKEND_URL || 'http://localhost:8000',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
