@@ -29,7 +29,17 @@ export default function Sidebar() {
     queryFn: () => projectsApi.list().then(r => r.data),
   })
 
-  const currentProject = projects[0]
+  const [activeProjectId, setActiveProjectId] = useState(() => {
+    const stored = localStorage.getItem('active_project_id')
+    return stored ? parseInt(stored) : null
+  })
+
+  const currentProject = projects.find(p => p.id === activeProjectId) || projects[0]
+
+  const switchProject = (id) => {
+    setActiveProjectId(id)
+    localStorage.setItem('active_project_id', String(id))
+  }
 
   return (
     <aside className="w-64 flex-shrink-0 bg-slate-900 flex flex-col h-full">
@@ -45,10 +55,22 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {currentProject && (
+      {projects.length > 0 && (
         <div className="px-4 py-3 border-b border-slate-700">
-          <p className="text-slate-500 text-xs uppercase tracking-wider mb-0.5">Project</p>
-          <p className="text-slate-200 text-sm font-medium truncate">{currentProject.name}</p>
+          <p className="text-slate-500 text-xs uppercase tracking-wider mb-1">Project</p>
+          {projects.length === 1 ? (
+            <p className="text-slate-200 text-sm font-medium truncate">{projects[0].name}</p>
+          ) : (
+            <select
+              value={currentProject?.id || ''}
+              onChange={e => switchProject(parseInt(e.target.value))}
+              className="w-full bg-slate-800 text-slate-200 text-xs border border-slate-600 rounded-lg px-2 py-1.5 focus:outline-none focus:border-alexandria-500"
+            >
+              {projects.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          )}
         </div>
       )}
 

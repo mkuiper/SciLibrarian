@@ -128,7 +128,38 @@ A chronological record of what was built each cycle and key decisions made along
 ### Sidebar additions
 - Restructure page link added to main navigation
 
-## Planned: Cycle 4
+---
+
+## Cycle 4 — 2026-05-05 — Scheduler, Production Deployment, Project Switching
+
+**Built:**
+
+### Automated background scheduler (`services/scheduler.py`)
+- APScheduler AsyncIOScheduler running in-process
+- Search monitors run every 6 hours (self-gate on daily/weekly frequency per monitor)
+- Monthly digests auto-generated on 1st of each month at 08:00 UTC, for all projects
+- Scheduler starts on app startup (skipped in test mode)
+
+### Production deployment configuration
+- `docker-compose.prod.yml`: production services (no --reload, 2 workers, restart always)
+- `nginx/nginx.conf`: nginx reverse proxy with SSL, streaming support for chat, SPA routing
+- `frontend/Dockerfile.prod`: multi-stage build — Node builder → nginx serving static files
+- CORS tightened to specific origin in production (set `allow_origins` in main.py)
+
+### Project switching
+- Multiple projects supported simultaneously
+- Sidebar shows project dropdown when >1 project exists
+- Active project stored in localStorage for persistence across refreshes
+
+## Planned: Cycle 5
+
+- pgvector semantic/embedding search upgrade (significant quality improvement for retrieval)
+- Reference tag editing inline
+- Batch upload (zip of PDFs)
+- Email delivery for monthly digests (SMTP config)
+- Search result deduplication in monitor queue
+- OpenAlex abstract inverted index reconstruction (already coded, needs testing)
+- Rate limiting and API key validation on startup
 
 - Scheduled digest automation (APScheduler monthly trigger)
 - pgvector semantic search upgrade
