@@ -12,6 +12,7 @@ import DigestPage from './pages/DigestPage'
 import ReferencePage from './pages/ReferencePage'
 import Settings from './pages/Settings'
 import WatchRequests from './pages/WatchRequests'
+import RestructurePage from './pages/RestructurePage'
 
 function PrivateRoute({ children }) {
   const { user } = useAuth()
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="watch-requests" element={<WatchRequests />} />
             <Route path="digests" element={<DigestPage />} />
             <Route path="settings" element={<Settings />} />
+            <Route path="restructure" element={<RestructurePage />} />
           </Route>
         </Routes>
       </BrowserRouter>

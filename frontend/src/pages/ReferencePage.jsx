@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { referencesApi } from '../api/client'
-import { ArrowLeft, ExternalLink, FileText, Trash2, Loader2, Copy, Download, ChevronDown, ChevronUp } from 'lucide-react'
+import { referencesApi, collectionsApi } from '../api/client'
+import { ArrowLeft, ExternalLink, FileText, Trash2, Loader2, Copy, Download, ChevronDown, ChevronUp, Pencil, Check, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const TYPE_COLORS = {
@@ -65,6 +65,54 @@ function plainCitation(ref) {
   return `${authors} (${year}). ${ref.title}.${url}`
 }
 
+const SOURCE_TYPES = ['paper', 'policy', 'model_card', 'evaluation', 'government', 'news', 'other']
+
+function InlineEdit({ value, onSave, multiline = false, className = '' }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value || '')
+
+  const save = async () => {
+    if (draft !== value) await onSave(draft)
+    setEditing(false)
+  }
+  const cancel = () => { setDraft(value || ''); setEditing(false) }
+
+  if (!editing) return (
+    <div className={`group flex items-start gap-1 ${className}`}>
+      <span className="flex-1">{value || <span className="text-gray-300 italic">Not set</span>}</span>
+      <button onClick={() => setEditing(true)} className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-300 hover:text-gray-500 flex-shrink-0">
+        <Pencil size={11} />
+      </button>
+    </div>
+  )
+
+  return (
+    <div className={className}>
+      {multiline ? (
+        <textarea
+          className="input text-sm w-full"
+          rows={4}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          autoFocus
+        />
+      ) : (
+        <input
+          className="input text-sm"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          autoFocus
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel() }}
+        />
+      )}
+      <div className="flex gap-1 mt-1">
+        <button onClick={save} className="btn-primary text-xs py-1 px-2"><Check size={11} /> Save</button>
+        <button onClick={cancel} className="btn-ghost text-xs py-1 px-2"><X size={11} /> Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 export default function ReferencePage() {
   const { refId } = useParams()
   const navigate = useNavigate()
@@ -75,6 +123,22 @@ export default function ReferencePage() {
     queryKey: ['reference', refId],
     queryFn: () => referencesApi.get(refId).then(r => r.data),
   })
+
+  const { data: collections = [] } = useQuery({
+    queryKey: ['collections-flat'],
+    queryFn: () => collectionsApi.list().then(r => r.data),
+  })
+
+  const update = async (field, value) => {
+    try {
+      await referencesApi.update(refId, { [field]: value })
+      queryClient.invalidateQueries({ queryKey: ['reference', refId] })
+      queryClient.invalidateQueries({ queryKey: ['references'] })
+      toast.success('Updated')
+    } catch {
+      toast.error('Failed to update')
+    }
+  }
 
   const handleDelete = async () => {
     if (!confirm('Delete this reference?')) return
@@ -110,13 +174,41 @@ export default function ReferencePage() {
         <div className="flex items-start justify-between gap-4 mb-6">
           <div className="flex-1">
             <div className="flex flex-wrap items-center gap-2 mb-3">
-              <span className={`badge text-xs ${TYPE_COLORS[ref.source_type] || TYPE_COLORS.other}`}>
-                {ref.source_type.replace('_', ' ')}
-              </span>
-              {ref.year && <span className="text-sm text-gray-400">{ref.year}</span>}
+              <select
+                value={ref.source_type}
+                onChange={e => update('source_type', e.target.value)}
+                className={`badge text-xs cursor-pointer border-0 bg-transparent focus:outline-none ${TYPE_COLORS[ref.source_type] || TYPE_COLORS.other}`}
+              >
+                {SOURCE_TYPES.map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
+              </select>
+              <InlineEdit
+                value={String(ref.year || '')}
+                onSave={v => update('year', v ? parseInt(v) : null)}
+                className="text-sm text-gray-400 w-16"
+              />
             </div>
-            <h1 className="text-xl font-bold text-gray-900 leading-tight">{ref.title}</h1>
-            {ref.authors && <p className="text-sm text-gray-500 mt-2">{ref.authors}</p>}
+            <InlineEdit
+              value={ref.title}
+              onSave={v => update('title', v)}
+              className="text-xl font-bold text-gray-900 leading-tight mb-1"
+            />
+            <InlineEdit
+              value={ref.authors || ''}
+              onSave={v => update('authors', v)}
+              className="text-sm text-gray-500 mt-1"
+            />
+            {/* Collection assignment */}
+            <div className="flex items-center gap-2 mt-2">
+              <span className="text-xs text-gray-400">Collection:</span>
+              <select
+                value={ref.collection_id || ''}
+                onChange={e => update('collection_id', e.target.value ? parseInt(e.target.value) : null)}
+                className="text-xs border border-gray-200 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-alexandria-400"
+              >
+                <option value="">Uncategorised</option>
+                {collections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
           </div>
           <div className="flex gap-2 flex-shrink-0">
             {hasPdf && <PdfViewer refId={ref.id} />}
@@ -156,24 +248,30 @@ export default function ReferencePage() {
         </div>
 
         {/* Alexandria summary */}
-        {ref.summary && (
-          <div className="mb-6">
-            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-              Alexandria's Summary
-            </h2>
-            <div className="bg-alexandria-50 border border-alexandria-100 rounded-xl p-4">
-              <p className="text-sm text-gray-700 leading-relaxed">{ref.summary}</p>
-            </div>
+        <div className="mb-6">
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+            Alexandria's Summary
+          </h2>
+          <div className="bg-alexandria-50 border border-alexandria-100 rounded-xl p-4">
+            <InlineEdit
+              value={ref.summary || ''}
+              onSave={v => update('summary', v)}
+              multiline
+              className="text-sm text-gray-700 leading-relaxed"
+            />
           </div>
-        )}
+        </div>
 
         {/* Abstract */}
-        {ref.abstract && (
-          <div className="mb-6">
-            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Abstract</h2>
-            <p className="text-sm text-gray-600 leading-relaxed">{ref.abstract}</p>
-          </div>
-        )}
+        <div className="mb-6">
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Abstract</h2>
+          <InlineEdit
+            value={ref.abstract || ''}
+            onSave={v => update('abstract', v)}
+            multiline
+            className="text-sm text-gray-600 leading-relaxed"
+          />
+        </div>
 
         {/* Tags */}
         {ref.tags?.length > 0 && (

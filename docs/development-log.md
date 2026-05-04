@@ -93,7 +93,50 @@ A chronological record of what was built each cycle and key decisions made along
 
 ---
 
-## Planned: Cycle 3
+---
+
+## Cycle 3 — 2026-05-05 — Polish, Bulk Actions, Restructure UI, Inline Editing
+
+**Goal:** Workflow polish, collection restructure UI, bulk review actions, Ollama auto-detection, inline reference editing.
+
+**Built:**
+
+### Restructure analysis page (`/restructure`)
+- Alexandria analyses current collections vs actual reference distribution
+- Shows prioritised recommendations (split/merge/create/move) with rationale
+- Colour-coded by priority (high/medium/low)
+- Alexandria's summary quote displayed prominently
+
+### Review queue improvements
+- Bulk approve / bulk reject all pending items
+- Collection assignment picker per item (choose where approved refs go)
+- Item count badge on tab headers
+- Improved layout with source badge and search query attribution
+
+### Inline reference editing
+- Every field on the reference detail page is now editable in-place
+- Hover to reveal pencil icon; click to edit; Enter/Escape to confirm/cancel
+- Title, authors, year, source type, summary, abstract all editable
+- Collection assignment dropdown inline
+- Changes save immediately via PATCH API
+
+### Ollama model auto-detection
+- `/librarian/models` now pings the Ollama API to list actually-installed models
+- Falls back to static defaults if Ollama is unreachable
+- Shows "(local, installed)" label for confirmed models
+
+### Sidebar additions
+- Restructure page link added to main navigation
+
+## Planned: Cycle 4
+
+- Scheduled digest automation (APScheduler monthly trigger)
+- pgvector semantic search upgrade
+- Project switching UI (support multiple active projects)
+- Email/notification for digest delivery
+- Cloud deployment config (production docker-compose, nginx, S3 uploads)
+- Reference tag editing inline
+- Batch upload (zip file of PDFs)
 
 - Restructure suggestions UI (Alexandria recommends collection reorganisation)
 - Bulk actions in review queue (approve all / reject all)

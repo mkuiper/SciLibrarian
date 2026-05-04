@@ -1,8 +1,10 @@
+import httpx
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from app.config import settings
 from app.dependencies import DB, CurrentUser
 from app.models.project import Project
 from app.services.librarian import chat, DEFAULT_SYSTEM_PROMPT
@@ -36,5 +38,23 @@ async def chat_endpoint(request: ChatRequest, db: DB, current_user: CurrentUser)
 
 @router.get("/models")
 async def list_models(current_user: CurrentUser):
-    """Return all available models grouped by provider."""
-    return PROVIDER_MODELS
+    """Return all available models grouped by provider, with live Ollama detection."""
+    models = {k: list(v) for k, v in PROVIDER_MODELS.items()}
+
+    try:
+        async with httpx.AsyncClient(timeout=2) as client:
+            resp = await client.get(f"{settings.ollama_base_url}/api/tags")
+            if resp.status_code == 200:
+                installed = resp.json().get("models", [])
+                if installed:
+                    models["ollama"] = [
+                        {
+                            "value": f"ollama/{m['name']}",
+                            "label": f"{m['name']} (local, installed)",
+                        }
+                        for m in installed
+                    ]
+    except Exception:
+        pass
+
+    return models
