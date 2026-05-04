@@ -6,7 +6,7 @@ import { BookOpen, Loader2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function Login() {
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const { login } = useAuth()
@@ -16,11 +16,11 @@ export default function Login() {
     e.preventDefault()
     setLoading(true)
     try {
-      const { data } = await authApi.login({ email, password })
+      const { data } = await authApi.login({ username, password })
       login(data.access_token, data.user)
       navigate('/')
     } catch {
-      toast.error('Invalid email or password')
+      toast.error('Invalid username or password')
     } finally {
       setLoading(false)
     }
@@ -38,17 +38,19 @@ export default function Login() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-2xl p-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-6">Sign in to your library</h2>
+          <h2 className="text-xl font-semibold text-gray-900 mb-6">Sign in</h2>
           <form onSubmit={submit} className="space-y-4">
             <div>
-              <label className="label">Email address</label>
+              <label className="label">Username</label>
               <input
-                type="email"
+                type="text"
                 required
                 className="input"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="you@example.com"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                placeholder="your username"
+                autoComplete="username"
+                autoFocus
               />
             </div>
             <div>
@@ -60,6 +62,7 @@ export default function Login() {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 placeholder="••••••••"
+                autoComplete="current-password"
               />
             </div>
             <button type="submit" disabled={loading} className="btn-primary w-full justify-center py-2.5">

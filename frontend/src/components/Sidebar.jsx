@@ -143,7 +143,7 @@ export default function Sidebar() {
             </div>
             <div className="min-w-0">
               <p className="text-slate-200 text-xs font-medium truncate">{user?.name}</p>
-              <p className="text-slate-500 text-xs truncate">{user?.email}</p>
+              <p className="text-slate-500 text-xs truncate">@{user?.username}</p>
             </div>
           </div>
           <button onClick={logout} className="text-slate-500 hover:text-slate-300 transition-colors ml-2" title="Sign out">

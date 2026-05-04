@@ -6,13 +6,17 @@ import { BookOpen, Loader2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function Register() {
-  const [form, setForm] = useState({ name: '', email: '', password: '' })
+  const [form, setForm] = useState({ name: '', username: '', password: '' })
   const [loading, setLoading] = useState(false)
   const { login } = useAuth()
   const navigate = useNavigate()
 
   const submit = async (e) => {
     e.preventDefault()
+    if (form.password.length < 8) {
+      toast.error('Password must be at least 8 characters')
+      return
+    }
     setLoading(true)
     try {
       const { data } = await authApi.register(form)
@@ -40,7 +44,7 @@ export default function Register() {
           <h2 className="text-xl font-semibold text-gray-900 mb-6">Create account</h2>
           <form onSubmit={submit} className="space-y-4">
             <div>
-              <label className="label">Full name</label>
+              <label className="label">Display name</label>
               <input
                 type="text"
                 required
@@ -51,26 +55,28 @@ export default function Register() {
               />
             </div>
             <div>
-              <label className="label">Email address</label>
+              <label className="label">Username</label>
               <input
-                type="email"
+                type="text"
                 required
                 className="input"
-                value={form.email}
-                onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                placeholder="you@example.com"
+                value={form.username}
+                onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
+                placeholder="jsmith"
+                autoComplete="username"
               />
+              <p className="text-xs text-gray-400 mt-1">Used to sign in — no email required</p>
             </div>
             <div>
               <label className="label">Password</label>
               <input
                 type="password"
                 required
-                minLength={8}
                 className="input"
                 value={form.password}
                 onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
                 placeholder="At least 8 characters"
+                autoComplete="new-password"
               />
             </div>
             <button type="submit" disabled={loading} className="btn-primary w-full justify-center py-2.5">
