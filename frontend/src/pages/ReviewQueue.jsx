@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { reviewApi, collectionsApi } from '../api/client'
-import { Check, X, ExternalLink, Loader2, CheckCheck, XCircle } from 'lucide-react'
+import { Check, X, ExternalLink, Loader2, CheckCheck, XCircle, Inbox } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -93,17 +93,9 @@ export default function ReviewQueue() {
     queryFn: () => reviewApi.getQueue({ status, limit: 100 }).then(r => r.data),
   })
 
-  const { data: collections = [] } = useQuery({
-    queryKey: ['collections'],
-    queryFn: () => reviewApi.listMonitors().then(() => []).catch(() => []),
-  })
-
   const { data: flatCollections = [] } = useQuery({
     queryKey: ['collections-flat'],
-    queryFn: async () => {
-      const { collectionsApi } = await import('../api/client')
-      return collectionsApi.list().then(r => r.data)
-    },
+    queryFn: () => collectionsApi.list().then(r => r.data),
   })
 
   const handleDecide = async (itemId, action, collectionId = null) => {
@@ -200,6 +192,7 @@ export default function ReviewQueue() {
         </div>
       ) : items.length === 0 ? (
         <div className="text-center py-16">
+          <Inbox size={32} className="text-gray-200 mx-auto mb-3" />
           <p className="text-gray-500 font-medium">No {status} items</p>
           <p className="text-gray-400 text-sm mt-1">
             {status === 'pending' ? 'Run a monitor to find new references, or check back later.' : 'Nothing here yet.'}
@@ -214,6 +207,7 @@ export default function ReviewQueue() {
               onDecide={handleDecide}
               collections={flatCollections}
             />
+
           ))}
         </div>
       )}

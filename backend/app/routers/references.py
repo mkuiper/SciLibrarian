@@ -104,6 +104,23 @@ async def ingest_from_url(
     return result.scalar_one()
 
 
+@router.get("/stats/summary")
+async def stats(db: DB, current_user: CurrentUser, project_id: Optional[int] = None):
+    """Aggregate counts for dashboard. Must be declared before /{ref_id} routes."""
+    stmt = select(func.count(Reference.id))
+    if project_id:
+        stmt = stmt.where(Reference.project_id == project_id)
+    total = (await db.execute(stmt)).scalar_one()
+
+    by_type_rows = await db.execute(
+        select(Reference.source_type, func.count(Reference.id))
+        .group_by(Reference.source_type)
+    )
+    by_type = {row[0]: row[1] for row in by_type_rows}
+
+    return {"total": total, "by_type": by_type}
+
+
 @router.get("", response_model=list[ReferenceOut])
 async def list_references(
     db: DB,
@@ -188,23 +205,6 @@ async def export_bibtex(ref_id: int, db: DB, current_user: CurrentUser):
     if not ref:
         raise HTTPException(status_code=404, detail="Reference not found")
     return _to_bibtex(ref)
-
-
-@router.get("/stats/summary")
-async def stats(db: DB, current_user: CurrentUser, project_id: Optional[int] = None):
-    """Aggregate counts for dashboard."""
-    stmt = select(func.count(Reference.id))
-    if project_id:
-        stmt = stmt.where(Reference.project_id == project_id)
-    total = (await db.execute(stmt)).scalar_one()
-
-    by_type_rows = await db.execute(
-        select(Reference.source_type, func.count(Reference.id))
-        .group_by(Reference.source_type)
-    )
-    by_type = {row[0]: row[1] for row in by_type_rows}
-
-    return {"total": total, "by_type": by_type}
 
 
 def _to_bibtex(ref: Reference) -> str:
