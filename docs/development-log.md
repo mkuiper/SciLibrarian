@@ -151,7 +151,38 @@ A chronological record of what was built each cycle and key decisions made along
 - Sidebar shows project dropdown when >1 project exists
 - Active project stored in localStorage for persistence across refreshes
 
-## Planned: Cycle 5
+---
+
+## Cycle 5 — 2026-05-05 — Semantic Search Foundation, Deduplication, Tag Editing
+
+**Built:**
+
+### Semantic search foundation (`services/embeddings.py`)
+- pgvector dependency added
+- `get_embedding()` via LiteLLM — works with OpenAI (text-embedding-3-small), Ollama (nomic-embed-text), Google
+- `similarity_search()` using pgvector cosine distance (`<=>` operator)
+- Graceful fallback if embedding column not yet added or pgvector not installed
+- **Activation:** requires `CREATE EXTENSION IF NOT EXISTS vector;` in PostgreSQL and adding an `embedding` column to the references table (migration pending — will be a separate Alembic migration)
+
+### Review queue deduplication
+- Before adding any item to the review queue, check for duplicates by URL (exact) and title (normalised, case-insensitive)
+- Also checks the library itself — won't re-queue things already approved
+- Reduces noise significantly for monitors that run frequently
+
+### Inline tag editing
+- Tags on reference detail page are now editable in-place
+- Click pencil → edit comma-separated string → save updates tag list via PATCH API
+- Consistent with the inline edit pattern established in Cycle 3
+
+## Planned: Cycle 6 (future)
+
+- Alembic migration to add embedding column + pgvector extension enable
+- Background embedding generation for existing references
+- Semantic search endpoint wired to frontend search
+- Email delivery for monthly digests (SMTP config)
+- Batch upload (zip file of PDFs)
+- Rate limiting middleware
+- Audit log (who added/modified what)
 
 - pgvector semantic/embedding search upgrade (significant quality improvement for retrieval)
 - Reference tag editing inline

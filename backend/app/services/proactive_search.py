@@ -167,6 +167,44 @@ SOURCES = {
 }
 
 
+async def _is_duplicate(db: AsyncSession, title: str, url: str | None) -> bool:
+    """
+    Check if this item is already in the library or the pending queue.
+    Matches on URL (exact) or normalised title (case-insensitive, stripped).
+    """
+    from app.models.reference import Reference
+    from sqlalchemy import func
+
+    norm_title = title.strip().lower()
+
+    if url:
+        existing_ref = await db.execute(select(Reference).where(Reference.url == url))
+        if existing_ref.scalar_one_or_none():
+            return True
+        existing_queue = await db.execute(
+            select(ReviewQueueItem).where(ReviewQueueItem.url == url, ReviewQueueItem.status == "pending")
+        )
+        if existing_queue.scalar_one_or_none():
+            return True
+
+    existing_title_ref = await db.execute(
+        select(Reference).where(func.lower(func.trim(Reference.title)) == norm_title)
+    )
+    if existing_title_ref.scalar_one_or_none():
+        return True
+
+    existing_title_queue = await db.execute(
+        select(ReviewQueueItem).where(
+            func.lower(func.trim(ReviewQueueItem.title)) == norm_title,
+            ReviewQueueItem.status == "pending",
+        )
+    )
+    if existing_title_queue.scalar_one_or_none():
+        return True
+
+    return False
+
+
 async def run_monitor(db: AsyncSession, monitor: SearchMonitor) -> int:
     all_results = []
     sources = [s.strip() for s in monitor.sources.split(",")]
@@ -180,8 +218,12 @@ async def run_monitor(db: AsyncSession, monitor: SearchMonitor) -> int:
                 pass
 
     added = 0
+    skipped_duplicates = 0
     for item in all_results:
         if not item.get("title"):
+            continue
+        if await _is_duplicate(db, item["title"], item.get("url")):
+            skipped_duplicates += 1
             continue
         db.add(ReviewQueueItem(
             title=item["title"],

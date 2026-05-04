@@ -67,6 +67,48 @@ function plainCitation(ref) {
 
 const SOURCE_TYPES = ['paper', 'policy', 'model_card', 'evaluation', 'government', 'news', 'other']
 
+function TagEditor({ tags, onSave }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(tags.join(', '))
+
+  const save = async () => {
+    const newTags = draft.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
+    await onSave(newTags)
+    setEditing(false)
+  }
+
+  if (!editing) return (
+    <div className="group flex items-center gap-1 flex-wrap">
+      {tags.length > 0
+        ? tags.map(t => <span key={t} className="badge bg-gray-100 text-gray-600">{t}</span>)
+        : <span className="text-gray-300 italic text-xs">No tags</span>
+      }
+      <button onClick={() => { setDraft(tags.join(', ')); setEditing(true) }}
+        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-300 hover:text-gray-500 ml-1">
+        <Pencil size={11} />
+      </button>
+    </div>
+  )
+
+  return (
+    <div>
+      <input
+        className="input text-sm"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        placeholder="tag1, tag2, tag3"
+        autoFocus
+        onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+      />
+      <p className="text-xs text-gray-400 mt-1">Comma-separated tags</p>
+      <div className="flex gap-1 mt-2">
+        <button onClick={save} className="btn-primary text-xs py-1 px-2"><Check size={11} /> Save</button>
+        <button onClick={() => setEditing(false)} className="btn-ghost text-xs py-1 px-2"><X size={11} /> Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 function InlineEdit({ value, onSave, multiline = false, className = '' }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value || '')
@@ -273,17 +315,14 @@ export default function ReferencePage() {
           />
         </div>
 
-        {/* Tags */}
-        {ref.tags?.length > 0 && (
-          <div className="mb-6">
-            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Tags</h2>
-            <div className="flex flex-wrap gap-1.5">
-              {ref.tags.map(t => (
-                <span key={t.tag} className="badge bg-gray-100 text-gray-600">{t.tag}</span>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Tags — editable */}
+        <div className="mb-6">
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Tags</h2>
+          <TagEditor
+            tags={ref.tags?.map(t => t.tag) || []}
+            onSave={tags => update('tags', tags)}
+          />
+        </div>
 
         {/* Extra metadata */}
         {ref.extra_metadata && Object.keys(ref.extra_metadata).length > 0 && (

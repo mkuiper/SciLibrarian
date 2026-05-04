@@ -21,3 +21,5 @@ python-dateutil==2.9.0
 typer==0.15.1
 rich==13.9.4
 aiofiles==24.1.0
+# pgvector: semantic/embedding search (Cycle 5)
+pgvector==0.3.6
