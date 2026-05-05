@@ -28,8 +28,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      # OLLAMA_BASE_URL: with --profile ollama this points to the ollama service.
-      # Without it, falls back to host machine (works on macOS/Windows).
+      # Ollama URL — three options (set in .env to override):
+      #   Option A: Ollama in Docker  → http://ollama:11434  (default, use --profile ollama)
+      #   Option B: Ollama on host (macOS/Windows) → http://host.docker.internal:11434
+      #   Option C: Ollama on host (Linux) → http://172.17.0.1:11434
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       VLLM_BASE_URL: ${VLLM_BASE_URL:-}
       SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:-}
@@ -44,6 +46,10 @@ services:
       db:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # extra_hosts lets the backend reach Ollama running on the host machine (Linux).
+    # Needed when OLLAMA_BASE_URL=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   frontend:
     build:
@@ -61,14 +67,11 @@ services:
       - backend
 
   # ── Optional: Ollama local model server ───────────────────────────────────
-  # Run with:  docker-compose --profile ollama up --build
-  # Then pull models inside the container:
-  #   docker-compose exec ollama ollama pull llama3.2
-  #   docker-compose exec ollama ollama pull mistral
-  #   docker-compose exec ollama ollama pull qwen2.5:7b
+  # Start with:  docker-compose --profile ollama up --build
+  # Pull models: docker-compose exec ollama ollama pull llama3.2
   #
   # GPU support (NVIDIA): uncomment the 'deploy' block below.
-  # Requires: nvidia-container-toolkit installed on host.
+  # Requires: sudo apt install nvidia-container-toolkit && sudo systemctl restart docker
   ollama:
     image: ollama/ollama:latest
     profiles: ["ollama"]
