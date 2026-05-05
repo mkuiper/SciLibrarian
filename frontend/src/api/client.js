@@ -59,6 +59,15 @@ export const referencesApi = {
     headers: { 'Content-Type': 'multipart/form-data' },
   }),
   fromUrl: (url, params) => api.post('/references/from-url', null, { params: { url, ...params } }),
+  uploadBulk: (formData) => api.post('/references/upload-bulk', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000, // 10 min for large batches
+  }),
+  uploadZip: (formData) => api.post('/references/upload-zip', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000,
+  }),
+  fromUrlsBulk: (data) => api.post('/references/from-urls-bulk', data, { timeout: 600000 }),
   update: (id, data) => api.patch(`/references/${id}`, data),
   delete: (id) => api.delete(`/references/${id}`),
   fileUrl: (id) => `${BASE}/references/${id}/file`,

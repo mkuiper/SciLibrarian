@@ -124,24 +124,70 @@ def ingest(
 
 @app.command()
 def ingest_dir(
-    directory: Path = typer.Argument(..., help="Directory containing PDFs"),
+    directory: Path = typer.Argument(..., help="Directory of PDFs (searched recursively)"),
     project_id: int = typer.Option(..., "--project", "-p"),
     collection_id: Optional[int] = typer.Option(None, "--collection", "-c"),
+    model: str = typer.Option("claude-sonnet-4-6", "--model"),
+    recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="Search subdirectories"),
     api_url: str = typer.Option(API_URL, envvar="SCILIBRARIAN_API_URL"),
 ):
-    """Batch ingest all PDFs in a directory."""
-    pdfs = list(directory.glob("*.pdf"))
+    """Batch ingest all PDFs in a directory (recursive by default)."""
+    pattern = "**/*.pdf" if recursive else "*.pdf"
+    pdfs = sorted(directory.glob(pattern))
     if not pdfs:
-        typer.echo(f"No PDFs found in {directory}")
+        typer.echo(f"No PDFs found in {directory}{' (recursive)' if recursive else ''}")
         raise typer.Exit(0)
 
-    typer.echo(f"Found {len(pdfs)} PDFs to ingest")
+    typer.echo(f"Found {len(pdfs)} PDFs to ingest\n")
+    ok, failed = 0, 0
     for i, pdf in enumerate(pdfs, 1):
-        typer.echo(f"[{i}/{len(pdfs)}] Processing {pdf.name}...")
+        typer.echo(f"[{i}/{len(pdfs)}] {pdf.relative_to(directory)}")
         try:
-            ingest(pdf, project_id=project_id, collection_id=collection_id, api_url=api_url)
+            ingest(pdf, project_id=project_id, collection_id=collection_id, model=model, api_url=api_url)
+            ok += 1
         except Exception as e:
-            typer.echo(f"  Failed: {e}", err=True)
+            typer.echo(f"  ✗ Failed: {e}", err=True)
+            failed += 1
+
+    typer.echo(f"\n{'─'*40}")
+    typer.echo(f"Done: {ok} succeeded, {failed} failed")
+
+
+@app.command()
+def ingest_urls(
+    urls_file: Path = typer.Argument(..., help="Text file with one URL per line"),
+    project_id: int = typer.Option(..., "--project", "-p"),
+    collection_id: Optional[int] = typer.Option(None, "--collection", "-c"),
+    model: str = typer.Option("claude-sonnet-4-6", "--model"),
+    api_url: str = typer.Option(API_URL, envvar="SCILIBRARIAN_API_URL"),
+):
+    """Batch ingest URLs from a text file (one URL per line)."""
+    if not urls_file.exists():
+        typer.echo(f"File not found: {urls_file}", err=True)
+        raise typer.Exit(1)
+
+    urls = [u.strip() for u in urls_file.read_text().splitlines() if u.strip() and not u.startswith("#")]
+    if not urls:
+        typer.echo("No URLs found in file")
+        raise typer.Exit(0)
+
+    typer.echo(f"Found {len(urls)} URLs to ingest\n")
+    token = _load_token()
+
+    with httpx.Client(base_url=api_url, headers={"Authorization": f"Bearer {token}"}, timeout=600) as client:
+        resp = client.post(
+            "/references/from-urls-bulk",
+            json={"urls": urls, "model": model, "collection_id": collection_id},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    typer.echo(f"\n{'─'*40}")
+    typer.echo(f"Done: {data['succeeded']}/{data['total']} succeeded")
+    for r in data.get("results", []):
+        typer.echo(f"  ✓ {r['title']}")
+    for e in data.get("errors", []):
+        typer.echo(f"  ✗ {e['url']}: {e['error']}", err=True)
 
 
 @app.command()
