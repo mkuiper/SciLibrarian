@@ -83,7 +83,8 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ollama_data:/root/.ollama
+      # Mount host model directory — uses already-downloaded models, no re-pulling needed
+      - /usr/share/ollama/.ollama:/root/.ollama
     restart: unless-stopped
     deploy:
       resources:
@@ -96,4 +97,3 @@ services:
 volumes:
   postgres_data:
   uploads_data:
-  ollama_data:
