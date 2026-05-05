@@ -205,6 +205,21 @@ async def create_watch_request(project_id: int, data: WatchRequestCreate, db: DB
     db.add(req)
     await db.flush()
     await db.refresh(req)
+
+    # Auto-create a monitor so the watch request actually runs searches
+    from app.models.search_monitor import SearchMonitor
+    keywords = data.keywords or data.description[:100]
+    monitor = SearchMonitor(
+        user_id=current_user.id,
+        name=f"Watch: {data.description[:60]}",
+        query=keywords,
+        sources="arxiv,semantic_scholar,openalex,web",
+        frequency="weekly",
+        enabled=True,
+    )
+    db.add(monitor)
+    await db.flush()
+
     return req
 
 
@@ -216,6 +231,17 @@ async def list_watch_requests(project_id: int, db: DB, current_user: CurrentUser
         .order_by(WatchRequest.created_at.desc())
     )
     return result.scalars().all()
+
+
+@router.delete("/{project_id}/watch-requests/{req_id}", status_code=204)
+async def delete_watch_request(project_id: int, req_id: int, db: DB, current_user: CurrentUser):
+    result = await db.execute(
+        select(WatchRequest).where(WatchRequest.id == req_id, WatchRequest.project_id == project_id)
+    )
+    req = result.scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Watch request not found")
+    await db.delete(req)
 
 
 class ProjectSettingsUpdate(BaseModel):

@@ -14,6 +14,7 @@ import Settings from './pages/Settings'
 import ConfigPage from './pages/ConfigPage'
 import WatchRequests from './pages/WatchRequests'
 import RestructurePage from './pages/RestructurePage'
+import CollectionsPage from './pages/CollectionsPage'
 
 function PrivateRoute({ children }) {
   const { user } = useAuth()
@@ -47,6 +48,7 @@ export default function App() {
             <Route path="settings" element={<Settings />} />
             <Route path="config" element={<ConfigPage />} />
             <Route path="restructure" element={<RestructurePage />} />
+            <Route path="collections" element={<CollectionsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

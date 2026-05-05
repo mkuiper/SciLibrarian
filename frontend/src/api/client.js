@@ -40,6 +40,7 @@ export const projectsApi = {
   getDigest: (projectId, digestId) => api.get(`/projects/${projectId}/digests/${digestId}`),
   listWatchRequests: (id) => api.get(`/projects/${id}/watch-requests`),
   createWatchRequest: (id, data) => api.post(`/projects/${id}/watch-requests`, data),
+  deleteWatchRequest: (projectId, reqId) => api.delete(`/projects/${projectId}/watch-requests/${reqId}`),
 }
 
 export const collectionsApi = {

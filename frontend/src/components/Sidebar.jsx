@@ -7,7 +7,7 @@ import CollectionTree from './CollectionTree'
 import {
   BookOpen, LayoutDashboard, Inbox, Radio,
   Plus, ChevronDown, ChevronRight, LogOut, FolderPlus,
-  Sparkles, Settings, Eye, LayoutGrid, SlidersHorizontal,
+  Sparkles, Settings, Eye, LayoutGrid, SlidersHorizontal, FolderTree,
 } from 'lucide-react'
 
 const navItem = 'flex items-center gap-2.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors'
@@ -92,6 +92,9 @@ export default function Sidebar() {
         </NavLink>
         <NavLink to="/digests" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
           <Sparkles size={16} />Monthly Digest
+        </NavLink>
+        <NavLink to="/collections" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
+          <FolderTree size={16} />Collections
         </NavLink>
         <NavLink to="/restructure" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
           <LayoutGrid size={16} />Restructure

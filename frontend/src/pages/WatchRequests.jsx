@@ -1,13 +1,9 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { projectsApi } from '../api/client'
-import { Eye, Plus, Loader2, Trash2 } from 'lucide-react'
+import { Eye, Plus, Loader2, Trash2, Radio } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
-
-const SOURCE_TYPE_OPTIONS = [
-  'paper', 'policy', 'model_card', 'evaluation', 'government', 'news', 'any',
-]
 
 function WatchRequestForm({ projectId, onClose }) {
   const [form, setForm] = useState({ description: '', keywords: '', source_types: 'any' })
@@ -24,7 +20,8 @@ function WatchRequestForm({ projectId, onClose }) {
         source_types: form.source_types === 'any' ? null : form.source_types,
       })
       queryClient.invalidateQueries({ queryKey: ['watch-requests', projectId] })
-      toast.success('Watch request created — Alexandria will look out for this')
+      queryClient.invalidateQueries({ queryKey: ['monitors'] })
+      toast.success('Watch request created — a weekly monitor has been set up automatically')
       onClose()
     } catch {
       toast.error('Failed to create watch request')
@@ -45,34 +42,20 @@ function WatchRequestForm({ projectId, onClose }) {
             required
             value={form.description}
             onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-            placeholder="e.g. Papers on mechanistic interpretability of large language models, especially work from Anthropic or DeepMind. I'm particularly interested in sparse autoencoders and activation patching methods."
+            placeholder="e.g. Papers on mechanistic interpretability of large language models, especially work using sparse autoencoders."
           />
           <p className="text-xs text-gray-400 mt-1">
-            Write naturally — Alexandria will extract the relevant search terms.
+            Write naturally. A weekly monitor will be created automatically using your keywords below.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="label">Keywords (optional)</label>
-            <input
-              className="input"
-              value={form.keywords}
-              onChange={e => setForm(f => ({ ...f, keywords: e.target.value }))}
-              placeholder="e.g. mechanistic interpretability, SAE"
-            />
-          </div>
-          <div>
-            <label className="label">Source type</label>
-            <select
-              className="input"
-              value={form.source_types}
-              onChange={e => setForm(f => ({ ...f, source_types: e.target.value }))}
-            >
-              {SOURCE_TYPE_OPTIONS.map(t => (
-                <option key={t} value={t}>{t === 'any' ? 'Any type' : t.replace('_', ' ')}</option>
-              ))}
-            </select>
-          </div>
+        <div>
+          <label className="label">Search keywords <span className="text-gray-400 font-normal">(used for the automated monitor)</span></label>
+          <input
+            className="input"
+            value={form.keywords}
+            onChange={e => setForm(f => ({ ...f, keywords: e.target.value }))}
+            placeholder="e.g. mechanistic interpretability sparse autoencoder"
+          />
         </div>
         <div className="flex gap-2">
           <button type="button" onClick={onClose} className="btn-ghost text-xs">Cancel</button>
@@ -86,7 +69,24 @@ function WatchRequestForm({ projectId, onClose }) {
   )
 }
 
-function WatchRequestCard({ request }) {
+function WatchRequestCard({ request, projectId }) {
+  const [deleting, setDeleting] = useState(false)
+  const queryClient = useQueryClient()
+
+  const del = async () => {
+    if (!confirm('Remove this watch request?')) return
+    setDeleting(true)
+    try {
+      await projectsApi.deleteWatchRequest(projectId, request.id)
+      queryClient.invalidateQueries({ queryKey: ['watch-requests', projectId] })
+      toast.success('Watch request removed')
+    } catch {
+      toast.error('Failed to remove')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <div className="card p-5">
       <div className="flex items-start justify-between gap-3">
@@ -99,17 +99,29 @@ function WatchRequestCard({ request }) {
             {request.source_types && (
               <span className="badge bg-blue-50 text-blue-700 text-xs">{request.source_types}</span>
             )}
+            <span className="text-xs text-gray-400 ml-auto">
+              {formatDistanceToNow(new Date(request.created_at), { addSuffix: true })}
+            </span>
           </div>
           <p className="text-sm text-gray-800 leading-relaxed">{request.description}</p>
           {request.keywords && (
             <p className="text-xs text-gray-400 mt-2">
-              Keywords: <span className="font-mono bg-gray-50 px-1 rounded">{request.keywords}</span>
+              Monitor keywords: <span className="font-mono bg-gray-50 px-1 rounded">{request.keywords}</span>
             </p>
           )}
-          <p className="text-xs text-gray-400 mt-2">
-            Submitted {formatDistanceToNow(new Date(request.created_at), { addSuffix: true })}
+          <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
+            <Radio size={10} className="text-emerald-400" />
+            Weekly monitor created automatically
           </p>
         </div>
+        <button
+          onClick={del}
+          disabled={deleting}
+          className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0"
+          title="Remove watch request"
+        >
+          {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+        </button>
       </div>
     </div>
   )
@@ -122,7 +134,6 @@ export default function WatchRequests() {
     queryKey: ['projects'],
     queryFn: () => projectsApi.list().then(r => r.data),
   })
-
   const currentProject = projects[0]
 
   const { data: requests = [], isLoading } = useQuery({
@@ -137,19 +148,36 @@ export default function WatchRequests() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">Watch Requests</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Tell Alexandria what you're looking for. She'll keep an eye out when running monitors and reviews.
+            Tell Alexandria what you're looking for — a search monitor is created automatically.
           </p>
         </div>
         <button onClick={() => setShowForm(v => !v)} className="btn-primary">
-          <Plus size={15} />
-          New request
+          <Plus size={15} />New request
         </button>
       </div>
 
-      <div className="bg-alexandria-50 border border-alexandria-100 rounded-xl p-4 mb-6">
-        <p className="text-sm text-alexandria-800 leading-relaxed">
-          <strong>How it works:</strong> Describe what you need in plain language. Alexandria will use your watch requests to inform what she flags during proactive searches and to tune monitor results to your research interests.
-        </p>
+      {/* Explain the difference */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Eye size={14} className="text-blue-600" />
+            <span className="text-sm font-semibold text-blue-800">Watch Requests</span>
+          </div>
+          <p className="text-xs text-blue-700 leading-relaxed">
+            Describe what you need in plain language. Creates a monitor automatically.
+            Alexandria also uses these when answering your chat questions.
+          </p>
+        </div>
+        <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Radio size={14} className="text-emerald-600" />
+            <span className="text-sm font-semibold text-emerald-800">Monitors</span>
+          </div>
+          <p className="text-xs text-emerald-700 leading-relaxed">
+            Automated scheduled searches (weekly/daily) across arXiv, OpenAlex, web.
+            Results go to the Review Queue for your approval.
+          </p>
+        </div>
       </div>
 
       {showForm && currentProject && (
@@ -157,18 +185,18 @@ export default function WatchRequests() {
       )}
 
       {!currentProject ? (
-        <div className="text-center py-12 text-gray-400">Create a project first to add watch requests.</div>
+        <div className="text-center py-12 text-gray-400">Create a project first.</div>
       ) : isLoading ? (
         <div className="flex items-center justify-center py-16"><Loader2 size={24} className="animate-spin text-gray-300" /></div>
       ) : requests.length === 0 ? (
         <div className="text-center py-16">
           <Eye size={32} className="text-gray-200 mx-auto mb-3" />
           <p className="text-gray-500 font-medium">No watch requests yet</p>
-          <p className="text-gray-400 text-sm mt-1">Tell Alexandria what types of papers and resources to look out for.</p>
+          <p className="text-gray-400 text-sm mt-1">Describe what Alexandria should look out for.</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {requests.map(r => <WatchRequestCard key={r.id} request={r} />)}
+          {requests.map(r => <WatchRequestCard key={r.id} request={r} projectId={currentProject.id} />)}
         </div>
       )}
     </div>
