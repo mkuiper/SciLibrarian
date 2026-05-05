@@ -81,7 +81,8 @@ async def extract_pdf_text(file_bytes: bytes) -> str:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     text = "\n\n".join(page.get_text() for page in doc)
     doc.close()
-    return text[:50000]
+    # Strip null bytes — PostgreSQL rejects \x00 in UTF-8 text columns
+    return text.replace("\x00", "")[:50000]
 
 
 async def extract_url_text(url: str) -> tuple[str, str]:
@@ -128,6 +129,13 @@ async def save_upload(file_bytes: bytes, original_filename: str) -> str:
     return str(path)
 
 
+def _clean(value):
+    """Strip null bytes from any string value (PostgreSQL rejects \\x00)."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    return value
+
+
 async def ingest_pdf(file_bytes: bytes, filename: str, model: str = "claude-sonnet-4-6") -> dict:
     text = await extract_pdf_text(file_bytes)
     file_path = await save_upload(file_bytes, filename)
@@ -135,7 +143,7 @@ async def ingest_pdf(file_bytes: bytes, filename: str, model: str = "claude-sonn
     meta["file_path"] = file_path
     meta["file_name"] = filename
     meta["full_text"] = text
-    return meta
+    return {k: _clean(v) for k, v in meta.items()}
 
 
 async def ingest_url(url: str, model: str = "claude-sonnet-4-6") -> dict:
@@ -143,4 +151,6 @@ async def ingest_url(url: str, model: str = "claude-sonnet-4-6") -> dict:
     meta = await generate_metadata(text, title, model)
     meta["url"] = url
     meta["full_text"] = text
-    return meta
+    return {k: _clean(v) for k, v in meta.items()}
+
+
