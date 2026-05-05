@@ -4,7 +4,35 @@ When a project is created, Alexandria analyses the description and goals
 to suggest an initial collection taxonomy and watch queries.
 """
 import json
+import re
 from app.services.llm import complete_text
+
+
+def _parse_json(raw: str) -> dict:
+    raw = raw.strip()
+    if "```" in raw:
+        parts = raw.split("```")
+        for part in parts:
+            part = part.strip()
+            if part.startswith("json"):
+                part = part[4:]
+            if part.strip().startswith("{"):
+                raw = part.strip()
+                break
+    start, end = raw.find("{"), raw.rfind("}") + 1
+    if start != -1 and end > start:
+        raw = raw[start:end]
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    fixed = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', raw)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+    fixed2 = re.sub(r',\s*([}\]])', r'\1', fixed)
+    return json.loads(fixed2)
 
 
 async def generate_initial_structure(
@@ -44,12 +72,7 @@ Design an optimal collection taxonomy for organising their references. Return va
 }}"""
 
     raw = await complete_text(model, prompt, max_tokens=2000)
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw.strip())
+    return _parse_json(raw)
 
 
 async def suggest_restructure(
@@ -80,9 +103,4 @@ Return JSON only:
 }}"""
 
     raw = await complete_text(model, prompt, max_tokens=1500)
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw.strip())
+    return _parse_json(raw)

@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -8,6 +9,69 @@ from bs4 import BeautifulSoup
 
 from app.config import settings
 from app.services.llm import complete_text
+
+
+def _parse_json_response(raw: str) -> dict:
+    """
+    Robustly parse a JSON response from an LLM.
+    Handles: markdown fences, invalid backslash escapes, trailing commas,
+    and partial responses. Falls back to extracting what it can.
+    """
+    raw = raw.strip()
+
+    # Strip markdown code fences
+    if "```" in raw:
+        parts = raw.split("```")
+        for part in parts:
+            part = part.strip()
+            if part.startswith("json"):
+                part = part[4:]
+            if part.strip().startswith("{"):
+                raw = part.strip()
+                break
+
+    # Find the outermost JSON object
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+    if start != -1 and end > start:
+        raw = raw[start:end]
+
+    # Try direct parse first
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Fix invalid backslash escapes — the most common Ollama failure
+    # Valid JSON escapes: \" \\ \/ \b \f \n \r \t \uXXXX
+    fixed = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', raw)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+
+    # Remove trailing commas before } or ]
+    fixed2 = re.sub(r',\s*([}\]])', r'\1', fixed)
+    try:
+        return json.loads(fixed2)
+    except json.JSONDecodeError:
+        pass
+
+    # Last resort: extract fields with regex
+    def extract(pattern, default=None):
+        m = re.search(pattern, raw, re.DOTALL)
+        return m.group(1).strip() if m else default
+
+    return {
+        "title": extract(r'"title"\s*:\s*"([^"]+)"', "Untitled"),
+        "authors": extract(r'"authors"\s*:\s*"([^"]+)"'),
+        "year": None,
+        "source_type": "paper",
+        "abstract": extract(r'"abstract"\s*:\s*"([^"]{20,}?)"'),
+        "summary": extract(r'"summary"\s*:\s*"([^"]{20,}?)"'),
+        "tags": [],
+        "extra_metadata": {},
+    }
 
 SOURCE_TYPES = ["paper", "policy", "model_card", "evaluation", "government", "news", "other"]
 
@@ -51,12 +115,7 @@ Return JSON with these fields:
 - extra_metadata: object with any other relevant fields (journal, doi, institution, etc.)"""
 
     raw = await complete_text(model, prompt, max_tokens=1500)
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw.strip())
+    return _parse_json_response(raw)
 
 
 async def save_upload(file_bytes: bytes, original_filename: str) -> str:
