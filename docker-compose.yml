@@ -68,10 +68,15 @@ services:
 
   # ── Optional: Ollama local model server ───────────────────────────────────
   # Start with:  docker-compose --profile ollama up --build
-  # Pull models: docker-compose exec ollama ollama pull llama3.2
+  # Pull models: docker-compose exec ollama ollama pull gemma4
+  #              docker-compose exec ollama ollama pull qwen3.5:9b
   #
-  # GPU support (NVIDIA): uncomment the 'deploy' block below.
-  # Requires: sudo apt install nvidia-container-toolkit && sudo systemctl restart docker
+  # GPU support is ENABLED below (requires nvidia-container-toolkit).
+  # Install: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+  #   curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+  #   curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  #   sudo apt update && sudo apt install -y nvidia-container-toolkit
+  #   sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
   ollama:
     image: ollama/ollama:latest
     profiles: ["ollama"]
@@ -80,13 +85,13 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
 volumes:
   postgres_data:
