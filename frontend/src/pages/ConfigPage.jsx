@@ -105,15 +105,13 @@ export default function ConfigPage() {
     ]},
     ...(allOllamaModels.length > 0 ? [{
       label: 'Ollama (local — installed)',
-      models: allOllamaModels.map(m => ({ value: m.value, label: `${m.name} (local)` })),
+      models: allOllamaModels.map(m => ({
+        value: m.value,
+        label: m.label || `${m.name} (local)`,
+      })),
     }] : [{
-      label: 'Ollama (local — not connected)',
-      models: [
-        { value: 'ollama/llama3.2', label: 'llama3.2' },
-        { value: 'ollama/mistral', label: 'mistral' },
-        { value: 'ollama/qwen2.5:7b', label: 'qwen2.5:7b' },
-        { value: 'ollama/deepseek-r1:7b', label: 'deepseek-r1:7b' },
-      ],
+      label: 'Ollama (not connected — see below)',
+      models: [{ value: 'ollama/gemma4:latest', label: 'gemma4:latest (start Ollama first)' }],
     }]),
   ]
 
@@ -196,17 +194,24 @@ export default function ConfigPage() {
         )}
 
         {!ollamaInfo?.connected && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm">
-            <p className="font-medium text-amber-800 mb-1">Ollama not detected</p>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-3">
+            <p className="font-medium text-amber-800">Ollama not reachable from Docker</p>
             <p className="text-amber-700 text-xs leading-relaxed">
-              Install from <strong>ollama.com</strong>, then run:
+              Ollama is probably running but bound to <code className="bg-amber-100 px-1 rounded">127.0.0.1</code> only.
+              Docker containers can't reach it. You need to restart Ollama bound to all interfaces:
             </p>
-            <pre className="bg-amber-100 rounded px-2 py-1 text-xs mt-2 font-mono">
-              ollama serve{'\n'}ollama pull llama3.2
+            <pre className="bg-amber-100 rounded px-3 py-2 text-xs font-mono text-amber-900 whitespace-pre-wrap">
+{`# Stop current Ollama, then restart with:
+OLLAMA_HOST=0.0.0.0 ollama serve
+
+# Or set permanently in your shell profile:
+echo 'export OLLAMA_HOST=0.0.0.0' >> ~/.bashrc`}
             </pre>
-            <p className="text-amber-600 text-xs mt-2">
-              Current URL: <code className="bg-amber-100 px-1 rounded">{ollamaInfo?.base_url || 'http://localhost:11434'}</code>
-              {' '}— set OLLAMA_BASE_URL in .env to change.
+            <p className="text-amber-700 text-xs">
+              Current URL: <code className="bg-amber-100 px-1 rounded">{ollamaInfo?.base_url || 'http://host.docker.internal:11434'}</code>
+            </p>
+            <p className="text-amber-600 text-xs">
+              After restarting Ollama, click <strong>Test</strong> above to verify.
             </p>
           </div>
         )}
