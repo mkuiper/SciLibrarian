@@ -175,7 +175,9 @@ export default function ConfigPage() {
         <div className="flex items-center gap-2 mb-4">
           <Server size={16} className={ollamaInfo?.connected ? 'text-emerald-500' : 'text-red-400'} />
           <span className="text-sm font-medium">
-            {ollamaInfo?.connected ? `Connected — ${ollamaInfo.models?.length || 0} model(s) installed` : 'Not connected'}
+            {ollamaInfo?.connected
+              ? `Connected — ${ollamaInfo.models?.length || 0} model(s) installed`
+              : 'Not connected'}
           </span>
           <button onClick={() => refetchOllama()} className="ml-auto btn-ghost text-xs gap-1">
             <RefreshCw size={11} />Test
@@ -187,31 +189,70 @@ export default function ConfigPage() {
             <p className="text-xs font-medium text-gray-500 mb-2">Installed models</p>
             <div className="flex flex-wrap gap-1.5">
               {allOllamaModels.map(m => (
-                <span key={m.name} className="badge bg-emerald-50 text-emerald-700 text-xs">{m.name}</span>
+                <span key={m.name || m.value} className="badge bg-emerald-50 text-emerald-700 text-xs">
+                  {m.name || m.value}
+                  {m.supports_tools && <span className="ml-1 opacity-60">tools✓</span>}
+                </span>
               ))}
             </div>
           </div>
         )}
 
         {!ollamaInfo?.connected && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-3">
-            <p className="font-medium text-amber-800">Ollama not reachable from Docker</p>
-            <p className="text-amber-700 text-xs leading-relaxed">
-              Ollama is probably running but bound to <code className="bg-amber-100 px-1 rounded">127.0.0.1</code> only.
-              Docker containers can't reach it. You need to restart Ollama bound to all interfaces:
-            </p>
-            <pre className="bg-amber-100 rounded px-3 py-2 text-xs font-mono text-amber-900 whitespace-pre-wrap">
-{`# Stop current Ollama, then restart with:
-OLLAMA_HOST=0.0.0.0 ollama serve
+          <div className="space-y-4">
+            {/* Option A: Docker built-in Ollama (recommended) */}
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+              <p className="font-semibold text-emerald-800 text-sm mb-1">
+                Option A — Ollama inside Docker (recommended, no configuration needed)
+              </p>
+              <p className="text-emerald-700 text-xs mb-3">
+                Stop the current stack and restart with the Ollama profile. Models are stored in a Docker volume.
+              </p>
+              <pre className="bg-emerald-100 rounded px-3 py-2 text-xs font-mono text-emerald-900 whitespace-pre-wrap">
+{`# In your terminal (outside Docker):
+docker-compose down
+docker-compose --profile ollama up --build
 
-# Or set permanently in your shell profile:
-echo 'export OLLAMA_HOST=0.0.0.0' >> ~/.bashrc`}
-            </pre>
-            <p className="text-amber-700 text-xs">
-              Current URL: <code className="bg-amber-100 px-1 rounded">{ollamaInfo?.base_url || 'http://host.docker.internal:11434'}</code>
-            </p>
-            <p className="text-amber-600 text-xs">
-              After restarting Ollama, click <strong>Test</strong> above to verify.
+# Then pull models (in another terminal):
+docker-compose exec ollama ollama pull gemma4
+docker-compose exec ollama ollama pull qwen3.5:9b`}
+              </pre>
+              <p className="text-emerald-600 text-xs mt-2">
+                The backend will automatically find Ollama at <code className="bg-emerald-100 px-1 rounded">http://ollama:11434</code>.
+                Update <code className="bg-emerald-100 px-1 rounded">OLLAMA_BASE_URL=http://ollama:11434</code> in your <code>.env</code> file.
+              </p>
+            </div>
+
+            {/* Option B: Fix host Ollama */}
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <p className="font-semibold text-amber-800 text-sm mb-1">
+                Option B — Fix your host Ollama (systemd service)
+              </p>
+              <p className="text-amber-700 text-xs mb-3">
+                Ollama is managed by systemd and restarting itself. Use <code className="bg-amber-100 px-1 rounded">systemctl</code> to reconfigure it:
+              </p>
+              <pre className="bg-amber-100 rounded px-3 py-2 text-xs font-mono text-amber-900 whitespace-pre-wrap">
+{`# 1. Stop the systemd service properly
+sudo systemctl stop ollama
+
+# 2. Add OLLAMA_HOST=0.0.0.0 to the service
+sudo systemctl edit ollama
+# In the editor, add:
+#   [Service]
+#   Environment="OLLAMA_HOST=0.0.0.0"
+
+# 3. Reload and start
+sudo systemctl daemon-reload
+sudo systemctl start ollama
+
+# 4. Verify — should show *:11434
+ss -tlnp | grep 11434`}
+              </pre>
+            </div>
+
+            <p className="text-xs text-gray-400">
+              Current URL being checked: <code className="bg-gray-100 px-1 rounded">{ollamaInfo?.base_url || 'http://host.docker.internal:11434'}</code>
+              {' '}· After fixing, click <strong>Test</strong> above.
             </p>
           </div>
         )}
