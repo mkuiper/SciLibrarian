@@ -1,8 +1,11 @@
+import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 engine = create_async_engine(settings.database_url, echo=False)
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -22,23 +25,26 @@ async def get_db() -> AsyncSession:
             raise
 
 
-# Columns added after the initial schema — applied idempotently on every startup.
-# These are safe to run repeatedly (ADD COLUMN IF NOT EXISTS).
+# Each migration runs in its own transaction so one failure doesn't block others.
+# 'references' is a reserved SQL word — must be double-quoted.
 _MIGRATIONS = [
-    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS domains JSONB DEFAULT '[]'::jsonb",
-    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS settings JSONB",
-    "ALTER TABLE collections ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id)",
-    "ALTER TABLE references ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id)",
-    "ALTER TABLE review_queue ADD COLUMN IF NOT EXISTS collection_id INTEGER REFERENCES collections(id)",
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS domains JSONB DEFAULT \'[]\'::jsonb',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS settings JSONB',
+    'ALTER TABLE collections ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id)',
+    'ALTER TABLE "references" ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id)',
+    'ALTER TABLE review_queue ADD COLUMN IF NOT EXISTS collection_id INTEGER REFERENCES collections(id)',
 ]
 
 
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Apply incremental column additions for tables that already exist
-        for migration in _MIGRATIONS:
-            try:
+
+    # Run each migration in its own transaction — one failure won't block others
+    for migration in _MIGRATIONS:
+        try:
+            async with engine.begin() as conn:
                 await conn.execute(text(migration))
-            except Exception:
-                pass  # Column likely already exists or table not yet created
+            logger.debug(f"Migration OK: {migration[:60]}")
+        except Exception as e:
+            logger.debug(f"Migration skipped ({e}): {migration[:60]}")
