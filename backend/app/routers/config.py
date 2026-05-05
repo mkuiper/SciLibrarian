@@ -15,16 +15,23 @@ router = APIRouter(prefix="/config", tags=["config"])
 @router.get("/status")
 async def system_status(current_user: CurrentUser):
     """Return status of all configured AI providers and search sources."""
+    # Check Ollama connectivity independently of model count
+    ollama_reachable = False
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.get(f"{settings.ollama_base_url}/api/tags")
+            ollama_reachable = resp.status_code == 200
+    except Exception:
+        pass
+
     providers = {
         "anthropic": bool(settings.anthropic_api_key),
         "openai":    bool(settings.openai_api_key),
         "google":    bool(settings.gemini_api_key or settings.google_api_key),
-        "ollama":    False,
+        "ollama":    ollama_reachable,
         "vllm":      bool(settings.vllm_base_url),
     }
     ollama_models = await get_ollama_models()
-    if ollama_models:
-        providers["ollama"] = True
 
     return {
         "providers": providers,
@@ -48,25 +55,33 @@ async def system_status(current_user: CurrentUser):
 @router.get("/ollama/models")
 async def ollama_models_endpoint(current_user: CurrentUser, refresh: bool = False):
     """Return installed Ollama models with capability info."""
-    models = await get_ollama_models(force=refresh)
-    connected = bool(models)
+    # First check raw connectivity (independent of model count)
+    api_reachable = False
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.get(f"{settings.ollama_base_url}/api/tags")
+            api_reachable = resp.status_code == 200
+    except Exception:
+        pass
 
-    if not connected:
+    if not api_reachable:
         return {
             "connected": False,
             "base_url": settings.ollama_base_url,
             "models": [],
             "error": (
                 f"Cannot reach Ollama at {settings.ollama_base_url}. "
-                "Check that Ollama is running and OLLAMA_BASE_URL is correct in .env. "
-                f"For host Ollama on Linux, set OLLAMA_BASE_URL=http://172.17.0.1:11434"
+                "The service must be bound to 0.0.0.0 for Docker to reach it. "
+                "Fix: sudo systemctl edit ollama → add Environment=OLLAMA_HOST=0.0.0.0 → sudo systemctl restart ollama"
             ),
         }
 
+    models = await get_ollama_models(force=refresh)
     return {
         "connected": True,
         "base_url": settings.ollama_base_url,
         "models": models,
+        "model_count": len(models),
     }
 
 
