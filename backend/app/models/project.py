@@ -12,7 +12,8 @@ class Project(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str] = mapped_column(Text)
-    domain: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    domain: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # legacy
+    domains: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, default=list)
     goals: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     initial_structure: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     settings: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import init_db
-from app.routers import auth, collections, references, search, librarian, review, projects
+from app.routers import auth, collections, references, search, librarian, review, projects, config
 from app.services.scheduler import start_scheduler, stop_scheduler
 
 
@@ -40,6 +40,7 @@ app.include_router(search.router)
 app.include_router(librarian.router)
 app.include_router(review.router)
 app.include_router(projects.router)
+app.include_router(config.router)
 
 
 @app.get("/health")

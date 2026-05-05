@@ -1,13 +1,18 @@
 """
-Monthly digest generation. Alexandria synthesises the state of the art across
-all topics in the project, highlighting significant developments and gaps.
+Digest generation at two levels:
+  - Collection digest: deep dive on a single collection's references
+  - Project digest: state-of-the-art overview across the whole project
+
+Both use actual reference summaries as source material.
 """
 from datetime import datetime, timezone
+from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.project import Project, Digest
+from app.models.collection import Collection
 from app.models.reference import Reference
 from app.services.llm import complete_text
 
@@ -19,20 +24,30 @@ async def generate_digest(
     period_start: datetime,
     period_end: datetime,
     model: str = "claude-sonnet-4-6",
+    collection_id: Optional[int] = None,
 ) -> Digest:
     project_result = await db.execute(select(Project).where(Project.id == project_id))
     project = project_result.scalar_one_or_none()
     if not project:
         raise ValueError(f"Project {project_id} not found")
 
+    scope_label = "project"
+    scope_name = project.name
+    if collection_id:
+        col_result = await db.execute(select(Collection).where(Collection.id == collection_id))
+        col = col_result.scalar_one_or_none()
+        if col:
+            scope_label = "collection"
+            scope_name = col.name
+
+    ref_filter = [Reference.project_id == project_id]
+    if collection_id:
+        ref_filter = [Reference.collection_id == collection_id]
+
     new_refs_result = await db.execute(
         select(Reference)
         .options(selectinload(Reference.tags))
-        .where(
-            Reference.project_id == project_id,
-            Reference.created_at >= period_start,
-            Reference.created_at <= period_end,
-        )
+        .where(*ref_filter, Reference.created_at >= period_start, Reference.created_at <= period_end)
         .order_by(Reference.created_at.desc())
     )
     new_refs = new_refs_result.scalars().all()
@@ -40,60 +55,73 @@ async def generate_digest(
     all_refs_result = await db.execute(
         select(Reference)
         .options(selectinload(Reference.tags))
-        .where(Reference.project_id == project_id)
+        .where(*ref_filter)
         .order_by(Reference.created_at.desc())
-        .limit(100)
+        .limit(80)
     )
     all_refs = all_refs_result.scalars().all()
 
-    new_refs_data = [
-        {
-            "title": r.title,
-            "authors": r.authors,
-            "year": r.year,
-            "source_type": r.source_type,
-            "summary": (r.summary or r.abstract or "")[:200],
-            "tags": [t.tag for t in r.tags],
-        }
-        for r in new_refs
-    ]
+    # Build rich source material from actual reference content
+    source_material = _build_source_material(all_refs)
+    new_refs_data = _build_source_material(new_refs, brief=True)
 
     all_tags: dict[str, int] = {}
     for r in all_refs:
         for t in r.tags:
             all_tags[t.tag] = all_tags.get(t.tag, 0) + 1
-    top_topics = sorted(all_tags.items(), key=lambda x: -x[1])[:15]
+    top_topics = sorted(all_tags.items(), key=lambda x: -x[1])[:12]
 
     prompt = f"""You are Alexandria, the research librarian for "{project.name}".
 
-Project: {project.description}
+Digest scope: {scope_label} "{scope_name}"
 Period: {period_start.strftime('%B %Y')} to {period_end.strftime('%B %Y')}
+Project description: {project.description}
 
-New references added this period ({len(new_refs)} total):
-{_format_refs(new_refs_data)}
+NEW references added this period ({len(new_refs)}):
+{new_refs_data if new_refs_data else '(none)'}
 
-Top topics across the full library: {', '.join(f"{t}({c})" for t, c in top_topics)}
+FULL library in scope ({len(all_refs)} references) — use these summaries as your source material:
+{source_material}
 
-Generate a comprehensive monthly digest in Markdown:
+Top topics: {', '.join(f"{t}({c})" for t, c in top_topics)}
 
-# Alexandria Monthly Digest — {period_end.strftime('%B %Y')}
+Generate a comprehensive digest in Markdown. Draw directly on the reference summaries above — cite papers by name, synthesise themes, identify patterns and contradictions.
+
+{"# Alexandria Collection Digest — " + scope_name + chr(10) if collection_id else "# Alexandria Monthly Digest — " + period_end.strftime('%B %Y') + chr(10)}
 ## {project.name}
 
 ### Executive Summary
+(2-3 sentences: scope, volume, key finding)
+
 ### New Additions This Period
-### State of the Art — Key Topics
-### Notable Developments
+(What was added and why it matters)
+
+### State of the Art — Key Themes
+(Synthesise what the library reveals about major themes — cite specific papers)
+
+### Notable Findings
+(Highlight surprising, significant, or novel results from the references)
+
 ### Coverage Gaps
+(What important areas are missing from {"this collection" if collection_id else "the library"}?)
+
 ### Recommended Next Steps
+(What should the team focus on acquiring next?)
 
 ---
 *Generated by Alexandria on {datetime.now(timezone.utc).strftime('%Y-%m-%d')}*"""
 
-    content = await complete_text(model, prompt, max_tokens=3000)
+    content = await complete_text(model, prompt, max_tokens=3500)
+
+    title = (
+        f"Collection Digest — {scope_name} — {period_end.strftime('%B %Y')}"
+        if collection_id
+        else f"Monthly Digest — {period_end.strftime('%B %Y')}"
+    )
 
     digest = Digest(
         project_id=project_id,
-        title=f"Monthly Digest — {period_end.strftime('%B %Y')}",
+        title=title,
         content=content,
         period_start=period_start,
         period_end=period_end,
@@ -106,12 +134,17 @@ Generate a comprehensive monthly digest in Markdown:
     return digest
 
 
-def _format_refs(refs: list[dict]) -> str:
+def _build_source_material(refs: list, brief: bool = False) -> str:
     if not refs:
         return "(none)"
     lines = []
-    for r in refs[:30]:
-        lines.append(f"- {r['title']} ({r.get('year', 'n.d.')}) [{r['source_type']}]")
-        if r.get("summary"):
-            lines.append(f"  {r['summary'][:180]}")
+    for r in refs[:40]:
+        lines.append(f"\n**{r.title}** ({r.year or 'n.d.'}) [{r.source_type}]")
+        if r.authors:
+            lines.append(f"  Authors: {r.authors[:120]}")
+        content = r.summary or r.abstract or ""
+        if content and not brief:
+            lines.append(f"  {content[:400]}")
+        elif content and brief:
+            lines.append(f"  {content[:150]}")
     return "\n".join(lines)

@@ -5,6 +5,7 @@ Free sources (no API key required):
   - arXiv: Preprints in physics, CS, maths, etc. Great for AI/ML papers.
   - Semantic Scholar: 200M+ academic papers. Free, rate-limited without key.
   - OpenAlex: 250M+ open scholarly works. Free, generous rate limit with email.
+  - DuckDuckGo: General web search — good for government docs, news, policy.
 
 Optional (require API keys in .env):
   - SEMANTIC_SCHOLAR_API_KEY: increases rate limit to 100 req/sec
@@ -160,10 +161,34 @@ def _reconstruct_abstract(inverted_index: dict | None) -> str:
     return " ".join(positions[i] for i in sorted(positions))
 
 
+async def search_web(query: str, max_results: int = 10) -> list[dict]:
+    """
+    DuckDuckGo web search — great for government policy docs, news, reports.
+    No API key needed. Uses the duckduckgo-search Python package.
+    """
+    try:
+        from duckduckgo_search import DDGS
+        results = []
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=max_results):
+                results.append({
+                    "title": r.get("title", ""),
+                    "abstract": r.get("body", ""),
+                    "authors": None,
+                    "year": None,
+                    "url": r.get("href"),
+                    "source": "web",
+                })
+        return results
+    except Exception:
+        return []
+
+
 SOURCES = {
     "arxiv": search_arxiv,
     "semantic_scholar": search_semantic_scholar,
     "openalex": search_openalex,
+    "web": search_web,
 }
 
 

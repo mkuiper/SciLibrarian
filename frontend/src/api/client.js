@@ -1,7 +1,5 @@
 import axios from 'axios'
 
-// All requests go through the Vite proxy (/api → backend).
-// This works in Docker (proxy targets internal network) and locally.
 const BASE = '/api'
 
 export const api = axios.create({ baseURL: BASE })
@@ -79,6 +77,11 @@ export const reviewApi = {
   updateMonitor: (id, data) => api.patch(`/review/monitors/${id}`, data),
   deleteMonitor: (id) => api.delete(`/review/monitors/${id}`),
   runMonitor: (id) => api.post(`/review/monitors/${id}/run`),
+}
+
+export const configApi = {
+  status: () => api.get('/config/status'),
+  ollamaModels: () => api.get('/config/ollama/models'),
 }
 
 export const librarianApi = {

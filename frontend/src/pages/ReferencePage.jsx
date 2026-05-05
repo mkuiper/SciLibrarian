@@ -15,28 +15,65 @@ const TYPE_COLORS = {
 }
 
 function PdfViewer({ refId }) {
-  const [show, setShow] = useState(false)
-  const url = referencesApi.fileUrl(refId)
+  const [blobUrl, setBlobUrl] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
 
-  if (!show) {
+  const load = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const token = localStorage.getItem('token')
+      const resp = await fetch(referencesApi.fileUrl(refId), {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!resp.ok) throw new Error(`Server returned ${resp.status}`)
+      const blob = await resp.blob()
+      setBlobUrl(URL.createObjectURL(blob))
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const close = () => {
+    if (blobUrl) URL.revokeObjectURL(blobUrl)
+    setBlobUrl(null)
+  }
+
+  if (!blobUrl && !loading) {
     return (
-      <button onClick={() => setShow(true)} className="btn-secondary text-xs">
+      <button onClick={load} className="btn-secondary text-xs">
         <FileText size={13} />
         View PDF
       </button>
     )
   }
 
+  if (loading) {
+    return (
+      <button disabled className="btn-secondary text-xs opacity-60">
+        <Loader2 size={13} className="animate-spin" />
+        Loading...
+      </button>
+    )
+  }
+
+  if (error) {
+    return <p className="text-xs text-red-500">Could not load PDF: {error}</p>
+  }
+
   return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">PDF Viewer</h2>
-        <button onClick={() => setShow(false)} className="text-xs text-gray-400 hover:text-gray-600">Hide</button>
+        <button onClick={close} className="text-xs text-gray-400 hover:text-gray-600">Hide</button>
       </div>
       <iframe
-        src={`${url}#toolbar=1&view=FitH`}
+        src={`${blobUrl}#toolbar=1&view=FitH`}
         className="w-full rounded-xl border border-gray-200"
-        style={{ height: '70vh' }}
+        style={{ height: '72vh' }}
         title="PDF viewer"
       />
     </div>

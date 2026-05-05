@@ -11,6 +11,7 @@ import Monitors from './pages/Monitors'
 import DigestPage from './pages/DigestPage'
 import ReferencePage from './pages/ReferencePage'
 import Settings from './pages/Settings'
+import ConfigPage from './pages/ConfigPage'
 import WatchRequests from './pages/WatchRequests'
 import RestructurePage from './pages/RestructurePage'
 
@@ -44,6 +45,7 @@ export default function App() {
             <Route path="watch-requests" element={<WatchRequests />} />
             <Route path="digests" element={<DigestPage />} />
             <Route path="settings" element={<Settings />} />
+            <Route path="config" element={<ConfigPage />} />
             <Route path="restructure" element={<RestructurePage />} />
           </Route>
         </Routes>

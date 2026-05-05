@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     # Semantic Scholar API key (optional, increases rate limit)
     semantic_scholar_api_key: str = ""
 
+    # Email / SMTP (for digest mailing list)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "alexandria@scilibrarian.local"
+    smtp_tls: bool = True
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

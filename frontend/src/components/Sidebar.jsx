@@ -5,9 +5,9 @@ import { collectionsApi, projectsApi } from '../api/client'
 import { useAuth } from '../store/auth'
 import CollectionTree from './CollectionTree'
 import {
-  BookOpen, LayoutDashboard, Inbox, Radio, FileText,
+  BookOpen, LayoutDashboard, Inbox, Radio,
   Plus, ChevronDown, ChevronRight, LogOut, FolderPlus,
-  Sparkles, Settings, Eye, LayoutGrid,
+  Sparkles, Settings, Eye, LayoutGrid, SlidersHorizontal,
 } from 'lucide-react'
 
 const navItem = 'flex items-center gap-2.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors'
@@ -132,8 +132,8 @@ export default function Sidebar() {
         >
           <Plus size={16} />New Project
         </button>
-        <NavLink to="/settings" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
-          <Settings size={16} />Settings
+        <NavLink to="/config" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
+          <SlidersHorizontal size={16} />Configuration
         </NavLink>
 
         <div className="flex items-center justify-between px-3 py-2 mt-1">

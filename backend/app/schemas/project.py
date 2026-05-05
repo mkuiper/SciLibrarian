@@ -6,14 +6,14 @@ from pydantic import BaseModel
 class ProjectCreate(BaseModel):
     name: str
     description: str
-    domain: Optional[str] = None
+    domains: list[str] = []
     goals: Optional[str] = None
 
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    domain: Optional[str] = None
+    domains: Optional[list[str]] = None
     goals: Optional[str] = None
     settings: Optional[dict[str, Any]] = None
 
@@ -22,7 +22,8 @@ class ProjectOut(BaseModel):
     id: int
     name: str
     description: str
-    domain: Optional[str]
+    domain: Optional[str]   # legacy single-domain field
+    domains: list[str] = []
     goals: Optional[str]
     initial_structure: Optional[dict[str, Any]]
     settings: Optional[dict[str, Any]]
@@ -49,6 +50,8 @@ class DigestCreate(BaseModel):
     period_start: datetime
     period_end: datetime
     model: str = "claude-sonnet-4-6"
+    collection_id: Optional[int] = None
+    send_email: bool = False
 
 
 class WatchRequestCreate(BaseModel):

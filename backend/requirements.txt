@@ -24,3 +24,7 @@ rich==13.9.4
 aiofiles==24.1.0
 # pgvector: semantic/embedding search (Cycle 5)
 pgvector==0.3.6
+# Web search for monitors (no API key needed)
+duckduckgo-search==6.3.7
+# Email delivery for digests
+aiosmtplib==3.0.2

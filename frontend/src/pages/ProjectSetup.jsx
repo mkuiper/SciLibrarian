@@ -5,12 +5,21 @@ import { projectsApi } from '../api/client'
 import { BookOpen, Loader2, Sparkles, ChevronRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-const DOMAIN_EXAMPLES = [
+const ALL_DOMAINS = [
   'AI Safety & Alignment',
   'Machine Learning Interpretability',
   'AI Governance & Policy',
   'Robustness & Red-teaming',
   'Frontier Model Evaluation',
+  'Model Cards & Transparency',
+  'Societal Impacts of AI',
+  'AI Standards & Regulation',
+  'Human-AI Interaction',
+  'Biosecurity & Dual-use AI',
+  'AI Economics & Labour',
+  'Technical AI Safety',
+  'AI Ethics',
+  'Compute & Infrastructure',
 ]
 
 export default function ProjectSetup() {
@@ -22,7 +31,7 @@ export default function ProjectSetup() {
   const [form, setForm] = useState({
     name: '',
     description: '',
-    domain: '',
+    domains: [],
     goals: '',
   })
 
@@ -138,25 +147,32 @@ export default function ProjectSetup() {
             </div>
 
             <div>
-              <label className="label">Research domain</label>
-              <input
-                className="input"
-                value={form.domain}
-                onChange={e => setForm(f => ({ ...f, domain: e.target.value }))}
-                placeholder="e.g. AI Safety & Alignment"
-              />
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {DOMAIN_EXAMPLES.map(d => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setForm(f => ({ ...f, domain: d }))}
-                    className="text-xs px-2.5 py-1 bg-gray-100 hover:bg-alexandria-50 hover:text-alexandria-700 text-gray-600 rounded-full transition-colors border border-gray-200 hover:border-alexandria-300"
-                  >
-                    {d}
-                  </button>
-                ))}
+              <label className="label">Research domains <span className="text-gray-400 font-normal">(select all that apply)</span></label>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {ALL_DOMAINS.map(d => {
+                  const selected = form.domains.includes(d)
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setForm(f => ({
+                        ...f,
+                        domains: selected ? f.domains.filter(x => x !== d) : [...f.domains, d]
+                      }))}
+                      className={`text-xs px-2.5 py-1 rounded-full transition-colors border ${
+                        selected
+                          ? 'bg-alexandria-600 text-white border-alexandria-600'
+                          : 'bg-gray-100 hover:bg-alexandria-50 hover:text-alexandria-700 text-gray-600 border-gray-200 hover:border-alexandria-300'
+                      }`}
+                    >
+                      {selected ? '✓ ' : ''}{d}
+                    </button>
+                  )
+                })}
               </div>
+              {form.domains.length === 0 && (
+                <p className="text-xs text-gray-400 mt-1.5">Select at least one domain to help Alexandria structure your library</p>
+              )}
             </div>
 
             <div>

@@ -19,17 +19,19 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 @router.post("", response_model=ProjectOut, status_code=201)
 async def create_project(data: ProjectCreate, db: DB, current_user: CurrentUser):
+    domain_str = ", ".join(data.domains) if data.domains else ""
     structure = await generate_initial_structure(
         name=data.name,
         description=data.description,
-        domain=data.domain or "",
+        domain=domain_str,
         goals=data.goals or "",
     )
 
     project = Project(
         name=data.name,
         description=data.description,
-        domain=data.domain,
+        domain=domain_str or None,
+        domains=data.domains,
         goals=data.goals,
         initial_structure=structure,
         created_by=current_user.id,
@@ -125,14 +127,25 @@ async def restructure_suggestions(project_id: int, db: DB, current_user: Current
 
 @router.post("/{project_id}/digests", response_model=DigestOut, status_code=201)
 async def create_digest(project_id: int, data: DigestCreate, db: DB, current_user: CurrentUser):
-    return await generate_digest(
+    digest = await generate_digest(
         db=db,
         project_id=project_id,
         user_id=current_user.id,
         period_start=data.period_start,
         period_end=data.period_end,
         model=data.model,
+        collection_id=data.collection_id,
     )
+
+    if data.send_email:
+        result = await db.execute(select(Project).where(Project.id == project_id))
+        project = result.scalar_one_or_none()
+        recipients = (project.settings or {}).get("digest_recipients", []) if project else []
+        if recipients:
+            from app.services.email_service import send_digest
+            await send_digest(recipients, digest.title, digest.content)
+
+    return digest
 
 
 @router.get("/{project_id}/digests", response_model=list[DigestOut])
