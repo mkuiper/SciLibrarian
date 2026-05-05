@@ -40,8 +40,10 @@ async def generate_initial_structure(
     description: str,
     domain: str,
     goals: str,
-    model: str = "claude-sonnet-4-6",
+    model: str | None = None,
 ) -> dict:
+    from app.config import settings
+    model = model or settings.default_librarian_model
     prompt = f"""You are Alexandria, an expert research librarian. A research team is setting up a new knowledge management project.
 
 Project name: {name}

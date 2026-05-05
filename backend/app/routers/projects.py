@@ -17,15 +17,41 @@ from app.services.digest import generate_digest
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
+def _default_structure(name: str, domains: list[str]) -> dict:
+    """Fallback structure when Alexandria is unavailable."""
+    return {
+        "welcome_message": (
+            f"Welcome to {name}. Your library is ready — add references using the "
+            "Add button, set up search monitors, and ask me anything via the chat panel."
+        ),
+        "collections": [
+            {"name": "Papers & Preprints",  "description": "Academic papers and preprints", "children": []},
+            {"name": "Policy & Governance", "description": "Policy documents and regulatory frameworks", "children": []},
+            {"name": "Reports & Reviews",   "description": "Technical reports, surveys and reviews", "children": []},
+            {"name": "Data & Datasets",     "description": "Datasets, benchmarks and evaluation data", "children": []},
+        ],
+        "suggested_watch_queries": [],
+        "initial_guidance": (
+            "Start by adding references — upload PDFs, paste URLs, or email them to your "
+            "ingestion address. Use the Monitors page to set up automated searches."
+        ),
+    }
+
+
 @router.post("", response_model=ProjectOut, status_code=201)
 async def create_project(data: ProjectCreate, db: DB, current_user: CurrentUser):
     domain_str = ", ".join(data.domains) if data.domains else ""
-    structure = await generate_initial_structure(
-        name=data.name,
-        description=data.description,
-        domain=domain_str,
-        goals=data.goals or "",
-    )
+
+    # Try to have Alexandria design the structure; fall back gracefully if unavailable
+    try:
+        structure = await generate_initial_structure(
+            name=data.name,
+            description=data.description,
+            domain=domain_str,
+            goals=data.goals or "",
+        )
+    except Exception:
+        structure = _default_structure(data.name, data.domains)
 
     project = Project(
         name=data.name,

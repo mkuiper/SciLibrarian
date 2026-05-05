@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { configApi, librarianApi, projectsApi } from '../api/client'
 import { CheckCircle, XCircle, Loader2, RefreshCw, Server, Cpu, Mail, Search, Save, Plus, X } from 'lucide-react'
@@ -53,17 +53,30 @@ export default function ConfigPage() {
   const project = projects[0]
   const ps = project?.settings || {}
 
+  const DEFAULT_MODEL = 'ollama/gemma4:latest'
+
   const [form, setForm] = useState({
-    librarian_model: ps.librarian_model || 'claude-sonnet-4-6',
-    ingestion_model: ps.ingestion_model || 'claude-sonnet-4-6',
-    digest_model: ps.digest_model || 'claude-sonnet-4-6',
-    librarian_system_prompt: ps.librarian_system_prompt || DEFAULT_PROMPT,
-    digest_recipients: (ps.digest_recipients || []).join('\n'),
+    librarian_model: DEFAULT_MODEL,
+    ingestion_model: DEFAULT_MODEL,
+    digest_model: DEFAULT_MODEL,
+    librarian_system_prompt: DEFAULT_PROMPT,
+    digest_recipients: '',
   })
 
-  // Sync form when project loads
-  useState(() => {
-    if (ps.librarian_model) setForm(f => ({ ...f, ...ps, digest_recipients: (ps.digest_recipients || []).join('\n') }))
+  // Sync form whenever the project loads or changes
+  useEffect(() => {
+    if (!project) return
+    const s = project.settings || {}
+    setForm({
+      librarian_model:         s.librarian_model         || DEFAULT_MODEL,
+      ingestion_model:         s.ingestion_model         || DEFAULT_MODEL,
+      digest_model:            s.digest_model            || DEFAULT_MODEL,
+      librarian_system_prompt: s.librarian_system_prompt || DEFAULT_PROMPT,
+      digest_recipients:       (s.digest_recipients || []).join('\n'),
+      anthropic_api_key:       s.anthropic_api_key       || '',
+      openai_api_key:          s.openai_api_key          || '',
+      gemini_api_key:          s.gemini_api_key          || '',
+    })
   }, [project?.id])
 
   const save = async () => {

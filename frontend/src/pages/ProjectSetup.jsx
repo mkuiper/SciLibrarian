@@ -70,7 +70,7 @@ export default function ProjectSetup() {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['collections-tree'] })
     } catch (err) {
-      toast.error('Failed to create project. Check your API key.')
+      toast.error(err.response?.data?.detail || 'Failed to create project — check the backend logs')
     } finally {
       setLoading(false)
     }
@@ -252,11 +252,15 @@ export default function ProjectSetup() {
 
             <button type="submit" disabled={loading} className="btn-primary w-full justify-center py-3">
               {loading ? (
-                <><Loader2 size={16} className="animate-spin" />Alexandria is designing your library...</>
+                <><Loader2 size={16} className="animate-spin" />Creating your library...</>
               ) : (
-                <><Sparkles size={16} />Create project with Alexandria</>
+                <><Sparkles size={16} />Create project</>
               )}
             </button>
+            <p className="text-xs text-center text-gray-400 mt-2">
+              Alexandria will design an initial collection structure. If the AI model is unavailable,
+              a default structure is created automatically.
+            </p>
           </form>
         </div>
       </div>
