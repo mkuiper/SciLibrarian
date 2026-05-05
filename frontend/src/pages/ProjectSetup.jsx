@@ -5,14 +5,28 @@ import { projectsApi } from '../api/client'
 import { BookOpen, Loader2, Sparkles, ChevronRight, X, Plus } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-// Suggestions only — users can type anything
+// Suggestions only — users can type anything. Covers broad research fields.
 const DOMAIN_SUGGESTIONS = [
+  // AI & Computing
   'AI Safety', 'AI Governance', 'Machine Learning', 'Interpretability',
-  'AI Policy', 'AI Ethics', 'Frontier Models', 'AI Evaluation',
-  'Robotics', 'Natural Language Processing', 'Computer Vision',
-  'Climate Science', 'Bioinformatics', 'Drug Discovery', 'Economics',
-  'Public Health', 'Neuroscience', 'Quantum Computing', 'Cybersecurity',
-  'Education', 'Social Sciences', 'Philosophy of Mind',
+  'AI Policy', 'AI Ethics', 'Robotics', 'Computer Vision', 'NLP',
+  'Cybersecurity', 'Quantum Computing', 'Software Engineering', 'HCI',
+  // Life Sciences
+  'Biology', 'Bioinformatics', 'Genomics', 'Drug Discovery', 'Pharmacology',
+  'Neuroscience', 'Ecology', 'Evolutionary Biology', 'Immunology',
+  'Public Health', 'Epidemiology', 'Clinical Medicine',
+  // Physical Sciences
+  'Physics', 'Chemistry', 'Materials Science', 'Astronomy', 'Geology',
+  'Atmospheric Science', 'Climate Science', 'Ocean Science', 'Energy',
+  // Engineering
+  'Mechanical Engineering', 'Electrical Engineering', 'Chemical Engineering',
+  'Civil Engineering', 'Biomedical Engineering', 'Aerospace', 'Nuclear',
+  // Social Sciences & Humanities
+  'Economics', 'Political Science', 'Sociology', 'Psychology',
+  'Philosophy', 'History', 'Law', 'Education', 'Anthropology',
+  'International Relations', 'Ethics',
+  // Multidisciplinary
+  'Sustainability', 'Food Security', 'Urban Planning', 'Finance',
 ]
 
 export default function ProjectSetup() {

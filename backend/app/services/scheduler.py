@@ -11,6 +11,8 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
@@ -60,6 +62,13 @@ async def _run_monthly_digests():
                 logger.error(f"Failed to generate digest for project {project.id}: {e}")
 
 
+async def _check_email_inbox():
+    from app.database import AsyncSessionLocal
+    from app.services.email_ingest import check_inbox
+    async with AsyncSessionLocal() as db:
+        await check_inbox(db)
+
+
 def start_scheduler():
     scheduler = get_scheduler()
 
@@ -80,6 +89,17 @@ def start_scheduler():
         replace_existing=True,
         misfire_grace_time=3600,
     )
+
+    # Check email inbox for user-submitted PDFs and URLs
+    if settings.ingest_email_enabled:
+        scheduler.add_job(
+            _check_email_inbox,
+            CronTrigger(minute=f"*/{settings.ingest_check_interval_minutes}"),
+            id="email_ingest",
+            replace_existing=True,
+            misfire_grace_time=120,
+        )
+        logger.info(f"Email ingestion enabled — checking every {settings.ingest_check_interval_minutes} min")
 
     scheduler.start()
     logger.info("Background scheduler started (monitors every 6h, digests monthly)")

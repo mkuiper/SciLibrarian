@@ -28,3 +28,5 @@ pgvector==0.3.6
 duckduckgo-search==6.3.7
 # Email delivery for digests
 aiosmtplib==3.0.2
+# IMAP email ingestion (users email PDFs/links to Alexandria)
+imap-tools==1.7.2

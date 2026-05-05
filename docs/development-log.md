@@ -174,7 +174,53 @@ A chronological record of what was built each cycle and key decisions made along
 - Click pencil → edit comma-separated string → save updates tag list via PATCH API
 - Consistent with the inline edit pattern established in Cycle 3
 
-## Planned: Cycle 6 (future)
+---
+
+## Cycle 7 — 2026-05-05 — Ollama-in-Docker, Alexandria Tools, Email Ingestion, Broad Domains
+
+**Built:**
+
+### Ollama as Docker Compose service
+- Add `ollama` service using Docker Compose profiles
+- `docker-compose --profile ollama up` → self-contained AI stack
+- Backend defaults `OLLAMA_BASE_URL=http://ollama:11434` (internal Docker network)
+- No more host.docker.internal fragility on Linux
+- GPU support: uncomment `deploy.resources.reservations` block
+- Models pulled with: `docker-compose exec ollama ollama pull llama3.2`
+
+### Alexandria's expanded toolkit (4 tools)
+- `search_library`: full-text search (existing)
+- `get_full_text`: retrieve complete extracted text of a specific reference
+- `web_search`: DuckDuckGo for policy docs, news, government reports
+- `lookup_paper`: fetch arXiv paper metadata by ID or title search
+- Up to 6 tool-call rounds per message (supports complex multi-step retrieval)
+- Parallel tool results accumulated before generating response
+
+### Email ingestion (IMAP polling)
+- `services/email_ingest.py`: polls IMAP inbox on a schedule
+- Processes PDF attachments → full ingestion pipeline
+- Extracts and processes URLs from subject and body (up to 5 per email)
+- Subject line used to guess target collection
+- Confirmation reply sent to sender (if SMTP configured)
+- Scheduler runs every INGEST_CHECK_INTERVAL_MINUTES (default 10)
+- Works with Gmail (App Password), Outlook, Fastmail, any IMAP provider
+
+### API key / Pro account clarification
+- Added explicit note in Config page: consumer Pro subscriptions ≠ developer API access
+- Per-project API key overrides added (Anthropic/OpenAI/Gemini per project)
+- _build_kwargs() in llm.py: project key takes priority over system .env key
+
+### Broad research domains
+- Expanded from 14 AI-specific domains to 50+ suggestions across all fields
+- Biology, Chemistry, Physics, Engineering, Social Sciences, Humanities, etc.
+- Free-form tag input with autocomplete — not restricted to suggestions
+
+### Documentation
+- README.md: comprehensive rewrite covering all features, Ollama setup,
+  email ingestion, API key clarification, CLI usage, architecture overview
+- .env.example: full email ingestion config with Gmail setup notes
+
+## Planned: Cycle 8 (future)
 
 - Alembic migration to add embedding column + pgvector extension enable
 - Background embedding generation for existing references

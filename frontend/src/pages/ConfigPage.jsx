@@ -306,6 +306,47 @@ export default function ConfigPage() {
         </p>
       </Section>
 
+      {/* Email ingestion */}
+      <Section title="Email Ingestion — Submit PDFs & Links by Email">
+        <div className="bg-alexandria-50 border border-alexandria-200 rounded-xl p-4 mb-4">
+          <p className="text-sm text-alexandria-800 leading-relaxed">
+            <strong>How it works:</strong> Create a dedicated inbox (e.g. <code className="bg-alexandria-100 px-1 rounded">ingest@yourdomain.com</code>
+            {' '}or a Gmail alias). Any team member can email PDFs or paste URLs to that address.
+            Alexandria checks it every 10 minutes, processes attachments and links, and files them into the library.
+            She replies to the sender with a confirmation.
+          </p>
+        </div>
+
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5 text-xs text-amber-800">
+          <strong>API keys &amp; "Pro" accounts:</strong> Claude.ai Pro, ChatGPT Plus, and Gemini Advanced are
+          consumer subscriptions — they don't expose API access. SciLibrarian uses the developer APIs (Anthropic API,
+          OpenAI API, Google AI API) which have separate billing. To use your own key, enter it in the
+          API Key Overrides section above. Your team can share one key set in <code>.env</code>, or each
+          project can override with its own.
+        </div>
+
+        <p className="text-xs text-gray-500 mb-4">
+          Enable in <code className="bg-gray-100 px-1 rounded">.env</code> — set{' '}
+          <code className="bg-gray-100 px-1 rounded">INGEST_EMAIL_ENABLED=true</code> and your IMAP credentials.
+          Works with Gmail, Outlook, Fastmail, or any IMAP provider.
+        </p>
+
+        <div className="bg-gray-800 rounded-xl p-4 text-xs font-mono text-green-400 space-y-0.5">
+          <p>INGEST_EMAIL_ENABLED=true</p>
+          <p>INGEST_IMAP_HOST=imap.gmail.com</p>
+          <p>INGEST_IMAP_PORT=993</p>
+          <p>INGEST_IMAP_USERNAME=ingest@yourdomain.com</p>
+          <p>INGEST_IMAP_PASSWORD=your-app-password</p>
+          <p>INGEST_DEFAULT_PROJECT_ID=1</p>
+          <p>INGEST_CHECK_INTERVAL_MINUTES=10</p>
+        </div>
+
+        <p className="text-xs text-gray-400 mt-3">
+          <strong>Gmail tip:</strong> Use an App Password (not your regular password) — enable 2FA then generate
+          one at myaccount.google.com/apppasswords. Set INGEST_IMAP_HOST=imap.gmail.com.
+        </p>
+      </Section>
+
       {/* Search sources */}
       <Section title="Search Sources">
         <p className="text-xs text-gray-400 mb-3">All sources are free — API keys only improve rate limits.</p>
