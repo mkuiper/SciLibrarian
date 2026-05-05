@@ -28,21 +28,25 @@ async def _attach_tags(db: DB, ref: Reference, tags: list[str]):
 
 
 @router.post("/upload", response_model=ReferenceOut, status_code=201)
-async def upload_pdf(
+async def upload_file(
     file: UploadFile = File(...),
     collection_id: Optional[int] = Form(None),
     model: str = Form("claude-sonnet-4-6"),
     db: DB = None,
     current_user: CurrentUser = None,
 ):
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+    from app.services.extractors import is_supported
+    if not is_supported(file.filename):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Supported: PDF, DOCX, TXT, MD, CSV, TSV, XLSX, JSON, PDB, FASTA"
+        )
 
     content = await file.read()
     if len(content) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(status_code=413, detail=f"File too large (max {settings.max_upload_mb}MB)")
 
-    meta = await ingestion.ingest_pdf(content, file.filename, model)
+    meta = await ingestion.ingest_file(content, file.filename, model)
 
     ref = Reference(
         title=meta.get("title", file.filename),
@@ -218,7 +222,7 @@ async def _ingest_pdf_and_save(
     db, content: bytes, filename: str, model: str,
     collection_id: Optional[int], project_id: Optional[int], user_id: int,
 ) -> dict:
-    meta = await ingestion.ingest_pdf(content, filename, model)
+    meta = await ingestion.ingest_file(content, filename, model)
     ref = Reference(
         title=meta.get("title", filename),
         authors=meta.get("authors"),
@@ -252,13 +256,14 @@ async def upload_bulk(
     db: DB = None,
     current_user: CurrentUser = None,
 ):
-    """Ingest multiple PDF files in one request. Max 30 files."""
-    pdf_files = [f for f in files if f.filename.lower().endswith(".pdf")][:BATCH_LIMIT]
-    if not pdf_files:
-        raise HTTPException(status_code=400, detail="No PDF files found in upload")
+    """Ingest multiple files in one request. Max 30 files. Supports all file types."""
+    from app.services.extractors import is_supported
+    valid_files = [f for f in files if is_supported(f.filename)][:BATCH_LIMIT]
+    if not valid_files:
+        raise HTTPException(status_code=400, detail="No supported files found in upload")
 
     succeeded, failed = [], []
-    for f in pdf_files:
+    for f in valid_files:
         try:
             content = await f.read()
             result = await _ingest_pdf_and_save(

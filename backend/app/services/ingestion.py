@@ -146,6 +146,31 @@ async def ingest_pdf(file_bytes: bytes, filename: str, model: str = "claude-sonn
     return {k: _clean(v) for k, v in meta.items()}
 
 
+async def ingest_file(file_bytes: bytes, filename: str, model: str = "claude-sonnet-4-6") -> dict:
+    """
+    Generic file ingestion — routes to the correct extractor based on file extension.
+    Falls back to PDF pipeline for .pdf files.
+    """
+    ext = Path(filename).suffix.lower()
+    if ext == ".pdf":
+        return await ingest_pdf(file_bytes, filename, model)
+
+    from app.services.extractors import get_extractor, is_supported
+    extractor = get_extractor(filename)
+    if not extractor:
+        raise ValueError(f"Unsupported file type: {ext}")
+
+    title, text = extractor(file_bytes, filename)
+    file_path = await save_upload(file_bytes, filename)
+    meta = await generate_metadata(text, title, model)
+    meta["file_path"] = file_path
+    meta["file_name"] = filename
+    meta["full_text"] = text
+    if not meta.get("title") or meta["title"] == "Untitled":
+        meta["title"] = title
+    return {k: _clean(v) for k, v in meta.items()}
+
+
 async def ingest_url(url: str, model: str = "claude-sonnet-4-6") -> dict:
     title, text = await extract_url_text(url)
     meta = await generate_metadata(text, title, model)

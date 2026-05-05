@@ -30,3 +30,7 @@ duckduckgo-search==6.3.7
 aiosmtplib==3.0.2
 # IMAP email ingestion (users email PDFs/links to Alexandria)
 imap-tools==1.7.2
+# Additional file type support
+pandas==2.2.3
+openpyxl==3.1.5
+python-docx==1.1.2

@@ -5,11 +5,19 @@ import { X, Upload, Link, Loader2, FileText, FolderOpen, List, CheckCircle, Aler
 import toast from 'react-hot-toast'
 
 const TABS = [
-  { id: 'pdf',     icon: FileText,   label: 'PDF' },
-  { id: 'multi',   icon: FolderOpen, label: 'Batch PDFs / ZIP' },
+  { id: 'pdf',     icon: FileText,   label: 'File' },
+  { id: 'multi',   icon: FolderOpen, label: 'Batch / ZIP' },
   { id: 'url',     icon: Link,       label: 'URL' },
   { id: 'urls',    icon: List,       label: 'Bulk URLs' },
 ]
+
+const ACCEPTED = [
+  '.pdf', '.docx', '.doc', '.txt', '.md', '.rst', '.tex',
+  '.csv', '.tsv', '.xlsx', '.xls', '.json',
+  '.pdb', '.ent', '.cif', '.sdf', '.mol', '.mol2', '.fasta', '.fa',
+].join(',')
+
+const FILE_TYPE_LABEL = 'PDF, Word, CSV, Excel, JSON, PDB, FASTA, plain text'
 
 function BatchResults({ results }) {
   if (!results) return null
@@ -202,7 +210,7 @@ export default function AddReferenceModal({ onClose, collectionId, projectId }) 
               onClick={() => fileRef.current?.click()}
               className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-alexandria-400 transition-colors"
             >
-              <input ref={fileRef} type="file" accept=".pdf" onChange={e => setFile(e.target.files[0])} className="hidden" />
+              <input ref={fileRef} type="file" accept={ACCEPTED} onChange={e => setFile(e.target.files[0])} className="hidden" />
               {file ? (
                 <>
                   <FileText size={32} className="text-alexandria-600 mx-auto mb-2" />
@@ -212,8 +220,8 @@ export default function AddReferenceModal({ onClose, collectionId, projectId }) 
               ) : (
                 <>
                   <Upload size={28} className="text-gray-300 mx-auto mb-3" />
-                  <p className="text-sm text-gray-600">Drop a PDF or <span className="text-alexandria-600 font-medium">browse</span></p>
-                  <p className="text-xs text-gray-400 mt-1">Alexandria extracts text, generates summary and metadata</p>
+                  <p className="text-sm text-gray-600">Drop a file or <span className="text-alexandria-600 font-medium">browse</span></p>
+                  <p className="text-xs text-gray-400 mt-1">{FILE_TYPE_LABEL}</p>
                 </>
               )}
             </div>
@@ -227,7 +235,7 @@ export default function AddReferenceModal({ onClose, collectionId, projectId }) 
               className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer hover:border-alexandria-400 transition-colors"
               onClick={() => (zipFile || multiFiles.length) ? null : multiRef.current?.click()}
             >
-              <input ref={multiRef} type="file" accept=".pdf" multiple onChange={e => { setMultiFiles([...e.target.files]); setZipFile(null) }} className="hidden" />
+              <input ref={multiRef} type="file" accept={ACCEPTED} multiple onChange={e => { setMultiFiles([...e.target.files]); setZipFile(null) }} className="hidden" />
               <input ref={zipRef} type="file" accept=".zip" onChange={e => { setZipFile(e.target.files[0]); setMultiFiles([]) }} className="hidden" />
 
               {zipFile ? (

@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     vllm_base_url: str = ""
 
     # Defaults
-    default_librarian_model: str = "claude-sonnet-4-6"
-    default_ingestion_model: str = "claude-sonnet-4-6"
+    default_librarian_model: str = "ollama/gemma4:latest"
+    default_ingestion_model: str = "ollama/gemma4:latest"
 
     environment: str = "development"
     upload_dir: str = "./uploads"
