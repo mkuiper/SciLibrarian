@@ -22,15 +22,17 @@ class ChatRequest(BaseModel):
 @router.post("/chat")
 async def chat_endpoint(request: ChatRequest, db: DB, current_user: CurrentUser):
     system_prompt = None
+    project_settings = None
 
     if request.project_id:
         result = await db.execute(select(Project).where(Project.id == request.project_id))
         project = result.scalar_one_or_none()
         if project and project.settings:
             system_prompt = project.settings.get("librarian_system_prompt")
+            project_settings = project.settings
 
     async def generate():
-        async for chunk in chat(db, request.messages, request.model, system_prompt):
+        async for chunk in chat(db, request.messages, request.model, system_prompt, project_settings):
             yield chunk
 
     return StreamingResponse(generate(), media_type="text/plain")

@@ -61,23 +61,30 @@ def model_supports_tools(model: str) -> bool:
     return any(model.startswith(prefix) for prefix in TOOL_USE_CAPABLE)
 
 
-def _build_kwargs(model: str, extra: dict | None = None) -> dict:
+def _build_kwargs(model: str, extra: dict | None = None, project_settings: dict | None = None) -> dict:
+    """
+    Build LiteLLM keyword arguments for a model call.
+    project_settings can override system API keys with per-project keys.
+    """
+    ps = project_settings or {}
     kwargs: dict = {}
 
     if model.startswith("claude-"):
-        if settings.anthropic_api_key:
-            kwargs["api_key"] = settings.anthropic_api_key
+        key = ps.get("anthropic_api_key") or settings.anthropic_api_key
+        if key:
+            kwargs["api_key"] = key
     elif model.startswith("gpt-") or (model.startswith("openai/") and settings.vllm_base_url):
-        if settings.openai_api_key:
-            kwargs["api_key"] = settings.openai_api_key
+        key = ps.get("openai_api_key") or settings.openai_api_key
+        if key:
+            kwargs["api_key"] = key
         if model.startswith("openai/") and settings.vllm_base_url:
             kwargs["api_base"] = settings.vllm_base_url
     elif model.startswith("gemini/"):
-        key = settings.gemini_api_key or settings.google_api_key
+        key = ps.get("gemini_api_key") or settings.gemini_api_key or settings.google_api_key
         if key:
             kwargs["api_key"] = key
     elif model.startswith("ollama/"):
-        kwargs["api_base"] = settings.ollama_base_url
+        kwargs["api_base"] = ps.get("ollama_base_url") or settings.ollama_base_url
 
     if extra:
         kwargs.update(extra)

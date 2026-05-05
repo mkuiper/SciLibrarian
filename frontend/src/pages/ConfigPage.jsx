@@ -256,6 +256,34 @@ export default function ConfigPage() {
         </button>
       </Section>
 
+      {/* Per-project API key overrides */}
+      <Section title="API Key Overrides">
+        <p className="text-xs text-gray-400 mb-4">
+          Override the system API keys (set in <code className="bg-gray-100 px-1 rounded">.env</code>) with project-specific keys.
+          Useful if team members have their own frontier API accounts.
+          Keys are stored in the project settings — only enter keys you're comfortable storing in the database.
+        </p>
+        <div className="space-y-3">
+          {[
+            ['anthropic_api_key', 'Anthropic API key', 'sk-ant-...'],
+            ['openai_api_key', 'OpenAI API key', 'sk-...'],
+            ['gemini_api_key', 'Google Gemini API key', 'AI...'],
+          ].map(([field, label, placeholder]) => (
+            <div key={field}>
+              <label className="label">{label} <span className="text-gray-400 font-normal">(optional override)</span></label>
+              <input
+                type="password"
+                className="input font-mono text-xs"
+                placeholder={placeholder}
+                value={form[field] || ''}
+                onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
+                autoComplete="off"
+              />
+            </div>
+          ))}
+        </div>
+      </Section>
+
       {/* Digest mailing list */}
       <Section title="Digest Mailing List">
         <div className="flex items-center gap-2 mb-3">

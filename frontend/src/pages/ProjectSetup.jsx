@@ -2,24 +2,17 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { projectsApi } from '../api/client'
-import { BookOpen, Loader2, Sparkles, ChevronRight } from 'lucide-react'
+import { BookOpen, Loader2, Sparkles, ChevronRight, X, Plus } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-const ALL_DOMAINS = [
-  'AI Safety & Alignment',
-  'Machine Learning Interpretability',
-  'AI Governance & Policy',
-  'Robustness & Red-teaming',
-  'Frontier Model Evaluation',
-  'Model Cards & Transparency',
-  'Societal Impacts of AI',
-  'AI Standards & Regulation',
-  'Human-AI Interaction',
-  'Biosecurity & Dual-use AI',
-  'AI Economics & Labour',
-  'Technical AI Safety',
-  'AI Ethics',
-  'Compute & Infrastructure',
+// Suggestions only — users can type anything
+const DOMAIN_SUGGESTIONS = [
+  'AI Safety', 'AI Governance', 'Machine Learning', 'Interpretability',
+  'AI Policy', 'AI Ethics', 'Frontier Models', 'AI Evaluation',
+  'Robotics', 'Natural Language Processing', 'Computer Vision',
+  'Climate Science', 'Bioinformatics', 'Drug Discovery', 'Economics',
+  'Public Health', 'Neuroscience', 'Quantum Computing', 'Cybersecurity',
+  'Education', 'Social Sciences', 'Philosophy of Mind',
 ]
 
 export default function ProjectSetup() {
@@ -28,12 +21,30 @@ export default function ProjectSetup() {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [project, setProject] = useState(null)
+  const [domainInput, setDomainInput] = useState('')
   const [form, setForm] = useState({
     name: '',
     description: '',
     domains: [],
     goals: '',
   })
+
+  const addDomain = (d) => {
+    const clean = d.trim()
+    if (clean && !form.domains.includes(clean)) {
+      setForm(f => ({ ...f, domains: [...f.domains, clean] }))
+    }
+    setDomainInput('')
+  }
+
+  const removeDomain = (d) => setForm(f => ({ ...f, domains: f.domains.filter(x => x !== d) }))
+
+  const handleDomainKey = (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault()
+      addDomain(domainInput)
+    }
+  }
 
   const handleCreate = async (e) => {
     e.preventDefault()
@@ -69,9 +80,7 @@ export default function ProjectSetup() {
 
             {structure.welcome_message && (
               <div className="bg-alexandria-50 border border-alexandria-200 rounded-xl p-4 mb-6">
-                <p className="text-sm text-alexandria-800 leading-relaxed italic">
-                  "{structure.welcome_message}"
-                </p>
+                <p className="text-sm text-alexandria-800 leading-relaxed italic">"{structure.welcome_message}"</p>
                 <p className="text-xs text-alexandria-600 mt-2 font-medium">— Alexandria</p>
               </div>
             )}
@@ -110,10 +119,7 @@ export default function ProjectSetup() {
               </div>
             )}
 
-            <button
-              onClick={() => navigate('/')}
-              className="btn-primary w-full justify-center"
-            >
+            <button onClick={() => navigate('/')} className="btn-primary w-full justify-center">
               Enter your library
               <ChevronRight size={16} />
             </button>
@@ -123,13 +129,17 @@ export default function ProjectSetup() {
     )
   }
 
+  const filteredSuggestions = DOMAIN_SUGGESTIONS.filter(
+    d => d.toLowerCase().includes(domainInput.toLowerCase()) && !form.domains.includes(d)
+  ).slice(0, 8)
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
       <div className="w-full max-w-2xl">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-gray-900">Set up your research project</h1>
           <p className="text-gray-500 mt-2 text-sm">
-            Tell Alexandria about your project and she'll design an optimal library structure for you.
+            Tell Alexandria about your project and she'll design an optimal library structure.
           </p>
         </div>
 
@@ -147,31 +157,59 @@ export default function ProjectSetup() {
             </div>
 
             <div>
-              <label className="label">Research domains <span className="text-gray-400 font-normal">(select all that apply)</span></label>
-              <div className="flex flex-wrap gap-1.5 mt-1">
-                {ALL_DOMAINS.map(d => {
-                  const selected = form.domains.includes(d)
-                  return (
+              <label className="label">
+                Research domains
+                <span className="text-gray-400 font-normal ml-1">(type and press Enter, or click suggestions)</span>
+              </label>
+              {form.domains.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {form.domains.map(d => (
+                    <span key={d} className="inline-flex items-center gap-1 px-2.5 py-1 bg-alexandria-600 text-white text-xs rounded-full">
+                      {d}
+                      <button type="button" onClick={() => removeDomain(d)} className="hover:text-alexandria-200">
+                        <X size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="relative">
+                <input
+                  className="input"
+                  value={domainInput}
+                  onChange={e => setDomainInput(e.target.value)}
+                  onKeyDown={handleDomainKey}
+                  onBlur={() => domainInput && addDomain(domainInput)}
+                  placeholder="e.g. AI Safety, Climate Science, Drug Discovery..."
+                />
+                {domainInput && filteredSuggestions.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-10 overflow-hidden">
+                    {filteredSuggestions.map(s => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => addDomain(s)}
+                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                      >
+                        <Plus size={12} className="text-gray-400" />{s}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {form.domains.length === 0 && !domainInput && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {DOMAIN_SUGGESTIONS.slice(0, 10).map(d => (
                     <button
                       key={d}
                       type="button"
-                      onClick={() => setForm(f => ({
-                        ...f,
-                        domains: selected ? f.domains.filter(x => x !== d) : [...f.domains, d]
-                      }))}
-                      className={`text-xs px-2.5 py-1 rounded-full transition-colors border ${
-                        selected
-                          ? 'bg-alexandria-600 text-white border-alexandria-600'
-                          : 'bg-gray-100 hover:bg-alexandria-50 hover:text-alexandria-700 text-gray-600 border-gray-200 hover:border-alexandria-300'
-                      }`}
+                      onClick={() => addDomain(d)}
+                      className="text-xs px-2.5 py-1 bg-gray-100 hover:bg-alexandria-50 hover:text-alexandria-700 text-gray-600 rounded-full transition-colors border border-gray-200"
                     >
-                      {selected ? '✓ ' : ''}{d}
+                      {d}
                     </button>
-                  )
-                })}
-              </div>
-              {form.domains.length === 0 && (
-                <p className="text-xs text-gray-400 mt-1.5">Select at least one domain to help Alexandria structure your library</p>
+                  ))}
+                </div>
               )}
             </div>
 
@@ -194,21 +232,15 @@ export default function ProjectSetup() {
                 rows={2}
                 value={form.goals}
                 onChange={e => setForm(f => ({ ...f, goals: e.target.value }))}
-                placeholder="What are the main research questions or objectives this library should support?"
+                placeholder="What questions should this library help answer?"
               />
             </div>
 
             <button type="submit" disabled={loading} className="btn-primary w-full justify-center py-3">
               {loading ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" />
-                  Alexandria is designing your library...
-                </>
+                <><Loader2 size={16} className="animate-spin" />Alexandria is designing your library...</>
               ) : (
-                <>
-                  <Sparkles size={16} />
-                  Create project with Alexandria
-                </>
+                <><Sparkles size={16} />Create project with Alexandria</>
               )}
             </button>
           </form>

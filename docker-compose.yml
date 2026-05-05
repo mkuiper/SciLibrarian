@@ -28,7 +28,9 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      # OLLAMA_BASE_URL: with --profile ollama this points to the ollama service.
+      # Without it, falls back to host machine (works on macOS/Windows).
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       VLLM_BASE_URL: ${VLLM_BASE_URL:-}
       SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:-}
       OPENALEX_EMAIL: ${OPENALEX_EMAIL:-}
@@ -42,9 +44,6 @@ services:
       db:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    extra_hosts:
-      # Allows backend to reach Ollama running on the host machine
-      - "host.docker.internal:host-gateway"
 
   frontend:
     build:
@@ -53,7 +52,6 @@ services:
     ports:
       - "5173:5173"
     environment:
-      # Vite proxy target: backend on Docker internal network
       BACKEND_URL: http://backend:8000
     volumes:
       - ./frontend:/app
@@ -62,6 +60,32 @@ services:
     depends_on:
       - backend
 
+  # ── Optional: Ollama local model server ───────────────────────────────────
+  # Run with:  docker-compose --profile ollama up --build
+  # Then pull models inside the container:
+  #   docker-compose exec ollama ollama pull llama3.2
+  #   docker-compose exec ollama ollama pull mistral
+  #   docker-compose exec ollama ollama pull qwen2.5:7b
+  #
+  # GPU support (NVIDIA): uncomment the 'deploy' block below.
+  # Requires: nvidia-container-toolkit installed on host.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
 volumes:
   postgres_data:
   uploads_data:
+  ollama_data:

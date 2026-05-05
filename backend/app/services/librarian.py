@@ -1,9 +1,14 @@
 """
 Alexandria — the SciLibrarian agent.
 
-For models that support tool use (Claude, GPT-4o, Gemini 1.5+), Alexandria
-searches the library via function calling. For models that don't (most Ollama
-models), search results are pre-fetched and injected into context automatically.
+Tools available to Alexandria during chat:
+  - search_library: full-text search across the reference database
+  - get_full_text: retrieve the complete extracted text of a specific reference
+  - web_search: DuckDuckGo web search for current events, policy docs, news
+  - lookup_paper: fetch paper metadata from arXiv by ID or search query
+
+For models without tool use (most Ollama models), search results are
+pre-fetched and injected into the system prompt automatically.
 """
 import json
 from typing import AsyncIterator
@@ -17,20 +22,79 @@ from app.services.llm import complete, stream_text, model_supports_tools, _build
 import litellm
 
 DEFAULT_SYSTEM_PROMPT = """You are Alexandria, an expert AI research librarian.
-Your role is to help researchers find, understand, and synthesise information from the reference library.
+Your role is to help researchers find, understand, and synthesise information.
 
-When answering questions:
-- Search the library for relevant references before answering
-- Cite specific papers/documents by their exact titles
-- Synthesise information across multiple sources when helpful
-- Flag gaps where the library lacks coverage on a topic
-- Be precise about what comes from the library vs your training knowledge
-- Keep responses focused and actionable for researchers
+You have access to tools: always search the library before answering research questions.
+When the library lacks coverage, use web_search to supplement — but clearly distinguish library sources from web sources.
 
-The library focuses on AI safety: technical papers, evaluations, model cards, government policies, and regulatory frameworks."""
+When answering:
+- Cite library references by exact title
+- Synthesise across multiple sources
+- Flag gaps in library coverage
+- Note when you are drawing on web search vs the library"""
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_library",
+            "description": "Search the reference library for relevant documents. Use this first for any research question.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search terms"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_full_text",
+            "description": "Retrieve the full extracted text of a specific reference from the library by its ID. Use when you need more detail than the summary provides.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reference_id": {"type": "integer", "description": "The ID of the reference"},
+                },
+                "required": ["reference_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the web for current information, policy documents, government reports, or news not in the library.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Web search query"},
+                    "max_results": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_paper",
+            "description": "Look up a specific paper on arXiv by ID (e.g. '2212.08073') or by title/author search.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "arXiv ID or search terms"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+]
 
 
-async def search_references(db: AsyncSession, query: str, limit: int = 8) -> list[dict]:
+async def _tool_search_library(db: AsyncSession, query: str) -> list[dict]:
     terms = query.lower().split()
     conditions = []
     for term in terms[:6]:
@@ -45,13 +109,12 @@ async def search_references(db: AsyncSession, query: str, limit: int = 8) -> lis
         )
     if not conditions:
         return []
-
     stmt = (
         select(Reference)
         .options(selectinload(Reference.tags))
         .where(or_(*conditions))
         .order_by(Reference.created_at.desc())
-        .limit(limit)
+        .limit(8)
     )
     result = await db.execute(stmt)
     refs = result.scalars().all()
@@ -70,23 +133,96 @@ async def search_references(db: AsyncSession, query: str, limit: int = 8) -> lis
     ]
 
 
+async def _tool_get_full_text(db: AsyncSession, reference_id: int) -> dict:
+    result = await db.execute(select(Reference).where(Reference.id == reference_id))
+    ref = result.scalar_one_or_none()
+    if not ref:
+        return {"error": f"Reference {reference_id} not found"}
+    return {
+        "id": ref.id,
+        "title": ref.title,
+        "full_text": (ref.full_text or "")[:12000],
+    }
+
+
+async def _tool_web_search(query: str, max_results: int = 5) -> list[dict]:
+    try:
+        from duckduckgo_search import DDGS
+        results = []
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=max_results):
+                results.append({
+                    "title": r.get("title", ""),
+                    "snippet": r.get("body", ""),
+                    "url": r.get("href", ""),
+                })
+        return results
+    except Exception as e:
+        return [{"error": str(e)}]
+
+
+async def _tool_lookup_paper(query: str) -> list[dict]:
+    import httpx
+    import xml.etree.ElementTree as ET
+
+    # If it looks like an arXiv ID, fetch directly
+    q = query.strip()
+    if q.replace(".", "").replace("/", "").isdigit() or q.startswith("abs/"):
+        url = f"https://export.arxiv.org/abs/{q.lstrip('abs/')}"
+        params = {"search_query": f"id:{q.lstrip('abs/')}", "max_results": 1}
+    else:
+        params = {"search_query": f"all:{q}", "max_results": 5, "sortBy": "relevance"}
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get("https://export.arxiv.org/api/query", params=params)
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        root = ET.fromstring(resp.text)
+        results = []
+        for entry in root.findall("atom:entry", ns):
+            results.append({
+                "title": (entry.find("atom:title", ns).text or "").strip(),
+                "authors": ", ".join(
+                    a.find("atom:name", ns).text
+                    for a in entry.findall("atom:author", ns)
+                    if a.find("atom:name", ns) is not None
+                ),
+                "summary": (entry.find("atom:summary", ns).text or "").strip()[:500],
+                "url": (entry.find("atom:id", ns).text or "").strip(),
+                "published": (entry.find("atom:published", ns).text or "")[:10],
+            })
+        return results
+    except Exception as e:
+        return [{"error": str(e)}]
+
+
+async def _dispatch_tool(db: AsyncSession, tool_name: str, tool_input: dict) -> str:
+    if tool_name == "search_library":
+        result = await _tool_search_library(db, tool_input.get("query", ""))
+    elif tool_name == "get_full_text":
+        result = await _tool_get_full_text(db, tool_input.get("reference_id", 0))
+    elif tool_name == "web_search":
+        result = await _tool_web_search(tool_input.get("query", ""), tool_input.get("max_results", 5))
+    elif tool_name == "lookup_paper":
+        result = await _tool_lookup_paper(tool_input.get("query", ""))
+    else:
+        result = {"error": f"Unknown tool: {tool_name}"}
+    return json.dumps(result)
+
+
 async def chat(
     db: AsyncSession,
     messages: list[dict],
     model: str = "claude-sonnet-4-6",
     system_prompt: str | None = None,
+    project_settings: dict | None = None,
 ) -> AsyncIterator[str]:
-    """
-    Stream a response from Alexandria.
-    Uses tool-calling for capable models; context injection for others.
-    """
     system = system_prompt or DEFAULT_SYSTEM_PROMPT
-
     if model_supports_tools(model):
-        async for chunk in _chat_with_tools(db, messages, model, system):
+        async for chunk in _chat_with_tools(db, messages, model, system, project_settings):
             yield chunk
     else:
-        async for chunk in _chat_with_context(db, messages, model, system):
+        async for chunk in _chat_with_context(db, messages, model, system, project_settings):
             yield chunk
 
 
@@ -95,57 +231,38 @@ async def _chat_with_tools(
     messages: list[dict],
     model: str,
     system: str,
+    project_settings: dict | None = None,
 ) -> AsyncIterator[str]:
-    """Tool-use path: Alexandria searches via function calling."""
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "search_library",
-                "description": "Search the reference library. Always call this before answering a research question.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search terms"},
-                    },
-                    "required": ["query"],
-                },
-            },
-        }
-    ]
-
     api_messages = [{"role": "system", "content": system}] + list(messages)
-    kwargs = _build_kwargs(model)
+    kwargs = _build_kwargs(model, project_settings=project_settings)
+    max_tool_rounds = 6
 
-    while True:
+    for _ in range(max_tool_rounds):
         response = await litellm.acompletion(
             model=model,
             messages=api_messages,
             max_tokens=2048,
-            tools=tools,
+            tools=TOOLS,
             tool_choice="auto",
             **kwargs,
         )
-
         choice = response.choices[0]
 
         if choice.finish_reason == "tool_calls" or (
             choice.message.tool_calls and len(choice.message.tool_calls) > 0
         ):
-            tool_call = choice.message.tool_calls[0]
-            query = json.loads(tool_call.function.arguments).get("query", "")
-            results = await search_references(db, query)
-
             api_messages.append(choice.message)
-            api_messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": json.dumps(results),
-            })
+            for tool_call in choice.message.tool_calls:
+                tool_input = json.loads(tool_call.function.arguments)
+                tool_result = await _dispatch_tool(db, tool_call.function.name, tool_input)
+                api_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": tool_result,
+                })
             continue
 
-        text = choice.message.content or ""
-        yield text
+        yield choice.message.content or ""
         break
 
 
@@ -154,18 +271,19 @@ async def _chat_with_context(
     messages: list[dict],
     model: str,
     system: str,
+    project_settings: dict | None = None,
 ) -> AsyncIterator[str]:
-    """Context-injection path for models without tool-use (e.g. Ollama)."""
+    """Context-injection for models without tool use (most Ollama models)."""
     last_user = next(
         (m["content"] for m in reversed(messages) if m["role"] == "user"), ""
     )
-    results = await search_references(db, last_user[:200])
+    results = await _tool_search_library(db, last_user[:200])
 
     if results:
-        context_block = "\n\nRelevant library references:\n" + json.dumps(results, indent=2)
-        augmented_system = system + context_block
+        context = "\n\nRelevant library references (auto-retrieved):\n" + json.dumps(results, indent=2)
+        augmented = system + context
     else:
-        augmented_system = system + "\n\nThe library has no references matching this query yet."
+        augmented = system + "\n\n(No matching references found in the library for this query.)"
 
-    async for chunk in stream_text(model, list(messages), system=augmented_system):
+    async for chunk in stream_text(model, list(messages), system=augmented):
         yield chunk

@@ -195,8 +195,13 @@ async def list_watch_requests(project_id: int, db: DB, current_user: CurrentUser
 class ProjectSettingsUpdate(BaseModel):
     librarian_model: str | None = None
     ingestion_model: str | None = None
+    digest_model: str | None = None
     librarian_system_prompt: str | None = None
     ollama_base_url: str | None = None
+    anthropic_api_key: str | None = None
+    openai_api_key: str | None = None
+    gemini_api_key: str | None = None
+    digest_recipients: list[str] | None = None
 
 
 @router.patch("/{project_id}/settings", response_model=ProjectOut)
