@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { referencesApi, collectionsApi, searchApi } from '../api/client'
+import { useProject } from '../hooks/useProject'
 import ReferenceCard from '../components/ReferenceCard'
 import AddReferenceModal from '../components/AddReferenceModal'
 import { Plus, Search, Filter, FolderPlus, Loader2, X } from 'lucide-react'
@@ -19,7 +20,7 @@ function NewCollectionForm({ parentId, onDone }) {
     e.preventDefault()
     setLoading(true)
     try {
-      await collectionsApi.create({ name, description: desc, parent_id: parentId })
+      await collectionsApi.create({ name, description: desc, parent_id: parentId, project_id: projectId })
       queryClient.invalidateQueries({ queryKey: ['collections-tree'] })
       toast.success('Collection created')
       onDone()
@@ -51,6 +52,7 @@ function NewCollectionForm({ parentId, onDone }) {
 export default function Library() {
   const { collectionId } = useParams()
   const colId = collectionId ? parseInt(collectionId) : undefined
+  const { projectId } = useProject()
   const [showAdd, setShowAdd] = useState(false)
   const [showNewCol, setShowNewCol] = useState(false)
   const [searchQ, setSearchQ] = useState('')

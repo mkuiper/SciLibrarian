@@ -44,8 +44,8 @@ export const projectsApi = {
 }
 
 export const collectionsApi = {
-  tree: () => api.get('/collections/tree'),
-  list: () => api.get('/collections'),
+  tree: (projectId) => api.get('/collections/tree', { params: projectId ? { project_id: projectId } : {} }),
+  list: (projectId) => api.get('/collections', { params: projectId ? { project_id: projectId } : {} }),
   get: (id) => api.get(`/collections/${id}`),
   create: (data) => api.post('/collections', data),
   update: (id, data) => api.patch(`/collections/${id}`, data),

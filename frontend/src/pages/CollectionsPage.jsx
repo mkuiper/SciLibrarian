@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { collectionsApi } from '../api/client'
+import { useProject } from '../hooks/useProject'
 import {
   FolderOpen, Folder, Plus, Pencil, Trash2, Check, X,
   Loader2, ChevronRight, ChevronDown,
@@ -115,7 +116,7 @@ function CollectionRow({ col, depth = 0, children, onEdit, onDelete, onAddChild 
   )
 }
 
-function AddCollectionForm({ parentId, parentName, onDone }) {
+function AddCollectionForm({ parentId, parentName, projectId, onDone }) {
   const [name, setName] = useState('')
   const [desc, setDesc] = useState('')
   const [loading, setLoading] = useState(false)
@@ -125,7 +126,12 @@ function AddCollectionForm({ parentId, parentName, onDone }) {
     e.preventDefault()
     setLoading(true)
     try {
-      await collectionsApi.create({ name, description: desc || null, parent_id: parentId || null })
+      await collectionsApi.create({
+        name,
+        description: desc || null,
+        parent_id: parentId || null,
+        project_id: projectId || null,
+      })
       queryClient.invalidateQueries({ queryKey: ['collections-tree'] })
       queryClient.invalidateQueries({ queryKey: ['collections-flat'] })
       toast.success('Collection created')
@@ -171,20 +177,26 @@ function AddCollectionForm({ parentId, parentName, onDone }) {
 
 export default function CollectionsPage() {
   const queryClient = useQueryClient()
+  const { project, projectId } = useProject()
   const [addingParentId, setAddingParentId] = useState(null)
   const [addingParentName, setAddingParentName] = useState('')
   const [showAddTop, setShowAddTop] = useState(false)
 
   const { data: tree = [], isLoading } = useQuery({
-    queryKey: ['collections-tree'],
-    queryFn: () => collectionsApi.tree().then(r => r.data),
+    queryKey: ['collections-tree', projectId],
+    queryFn: () => collectionsApi.tree(projectId).then(r => r.data),
+    enabled: !!projectId,
   })
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['collections-tree'] })
+    queryClient.invalidateQueries({ queryKey: ['collections-flat'] })
+  }
 
   const handleEdit = async (id, name) => {
     try {
       await collectionsApi.update(id, { name })
-      queryClient.invalidateQueries({ queryKey: ['collections-tree'] })
-      queryClient.invalidateQueries({ queryKey: ['collections-flat'] })
+      invalidate()
       toast.success('Renamed')
     } catch {
       toast.error('Failed to rename')
@@ -198,8 +210,7 @@ export default function CollectionsPage() {
     if (!confirm(msg)) return
     try {
       await collectionsApi.delete(id)
-      queryClient.invalidateQueries({ queryKey: ['collections-tree'] })
-      queryClient.invalidateQueries({ queryKey: ['collections-flat'] })
+      invalidate()
       toast.success('Collection deleted')
     } catch {
       toast.error('Failed to delete')
@@ -226,7 +237,8 @@ export default function CollectionsPage() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">Collections</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Manage the folder structure of your library. Hover over a collection to rename, add sub-collections, or delete.
+            {project ? `${project.name} · ` : ''}Manage your library's folder structure.
+            Hover any collection to rename, add sub-collections, or delete.
           </p>
         </div>
         <button onClick={() => { setShowAddTop(true); setAddingParentId(null) }} className="btn-primary">
@@ -235,13 +247,14 @@ export default function CollectionsPage() {
       </div>
 
       {showAddTop && (
-        <AddCollectionForm parentId={null} parentName="" onDone={() => setShowAddTop(false)} />
+        <AddCollectionForm parentId={null} parentName="" projectId={projectId} onDone={() => setShowAddTop(false)} />
       )}
 
       {addingParentId && (
         <AddCollectionForm
           parentId={addingParentId}
           parentName={addingParentName}
+          projectId={projectId}
           onDone={() => { setAddingParentId(null); setAddingParentName('') }}
         />
       )}

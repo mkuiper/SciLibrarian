@@ -19,9 +19,11 @@ export default function Sidebar() {
   const navigate = useNavigate()
   const [collectionsOpen, setCollectionsOpen] = useState(true)
 
+  const currentProjectId = currentProject?.id
+
   const { data: tree = [] } = useQuery({
-    queryKey: ['collections-tree'],
-    queryFn: () => collectionsApi.tree().then(r => r.data),
+    queryKey: ['collections-tree', currentProjectId],
+    queryFn: () => collectionsApi.tree(currentProjectId).then(r => r.data),
   })
 
   const { data: projects = [] } = useQuery({
@@ -135,6 +137,9 @@ export default function Sidebar() {
         >
           <Plus size={16} />New Project
         </button>
+        <NavLink to="/how-it-works" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
+          <BookOpen size={16} />How it works
+        </NavLink>
         <NavLink to="/config" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
           <SlidersHorizontal size={16} />Configuration
         </NavLink>

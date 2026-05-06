@@ -7,6 +7,7 @@ class CollectionCreate(BaseModel):
     name: str
     description: Optional[str] = None
     parent_id: Optional[int] = None
+    project_id: Optional[int] = None
 
 
 class CollectionUpdate(BaseModel):
@@ -20,6 +21,7 @@ class CollectionOut(BaseModel):
     name: str
     description: Optional[str]
     parent_id: Optional[int]
+    project_id: Optional[int]
     path: str
     created_by: int
     created_at: datetime
