@@ -1,0 +1,383 @@
+================================================================================
+  SCILIBRARIAN — CODEX AGENT CODE REVIEW BRIEFING
+  Prepared by: Claude Sonnet 4.6 (the original author)
+  Date: 2026-05-06
+================================================================================
+
+CURRENT GIT STATE (safe revert point)
+---------------------------------------
+Repository:  git@github.com:mkuiper/SciLibrarian.git
+Branch:      main
+HEAD commit: 9d7d95137225fe5a69b9c43618b785ee13d872f4
+Short hash:  9d7d951
+
+To revert to this state:
+  git fetch origin
+  git reset --hard 9d7d951   # local only
+  # or to restore a working tree after breakage:
+  git checkout 9d7d951 -- .
+
+Commit history summary (37 commits, all on main, 2026-05-04 to 2026-05-06):
+  9d7d951  fix: PDF-aware URL ingestion + reprocess button
+  c1c9e7f  feat: full ingestion on review approve + relevance filtering
+  3ab0741  fix: Boolean import missing in reference model
+  da39af4  fix: collection creation pydantic greenlet bug + starred/notes/read
+  99de133  feat: project deletion, collection scoping fixes
+  db0bd48  fix: Sidebar blank page (declaration order crash)
+  d1dd4ca  feat: project-scoped collections, How It Works page
+  ...  (37 total — see git log --oneline for full history)
+
+
+================================================================================
+  WHAT THIS PROJECT IS
+================================================================================
+
+SciLibrarian is an AI-powered knowledge management platform for research teams.
+Its core feature is an AI librarian agent named Alexandria who helps researchers
+ingest, organise, search, and stay current with academic literature.
+
+Primary use case: the Australian AI Safety Institute managing a growing
+library of AI safety papers, policy documents, model cards, and evaluations.
+
+Key user workflows:
+  1. Upload PDFs or paste URLs → Alexandria extracts text, generates summary + tags
+  2. Browse the library by collection (hierarchical folders) or search full text
+  3. Set up monitors (automated searches) → results go to Review Queue → approve
+  4. Ask Alexandria questions in the chat panel → she searches the library + web
+  5. Generate monthly digests → state-of-the-art synthesis of the library
+  6. Watch Requests → plain-language descriptions of what you're looking for
+
+
+================================================================================
+  TECH STACK
+================================================================================
+
+Backend:
+  - Python 3.12, FastAPI 0.115, SQLAlchemy 2.0 (async), asyncpg
+  - PostgreSQL 16 (database, no vector store yet — pgvector column exists but
+    embedding generation not yet wired end-to-end)
+  - LiteLLM 1.56 (unified AI API — Claude, GPT-4o, Gemini, Ollama, vLLM)
+  - For Ollama specifically: bypasses LiteLLM and calls /api/chat directly
+    (reason: LiteLLM's ollama provider can't forward think=false, breaking
+    qwen3/deepseek-r1 streaming — see docs/ollama-integration-investigation.md)
+  - PyMuPDF (PDF text extraction), httpx, BeautifulSoup4, pandas, openpyxl,
+    python-docx (multi-format ingestion)
+  - APScheduler (in-process scheduler: monitors every 6h, digest monthly)
+  - duckduckgo-search, imap-tools, aiosmtplib
+
+Frontend:
+  - React 18, Vite 6, Tailwind CSS 3
+  - TanStack Query v5 (server state), React Router v6, Axios
+  - Lucide icons, react-hot-toast, react-markdown
+
+Infrastructure:
+  - Docker Compose (db, backend, frontend, optional ollama via --profile ollama)
+  - Ollama service mounts host model directory /usr/share/ollama/.ollama
+    (avoids re-downloading models; 13 models including gemma4, qwen3.5, medgemma)
+  - GPU passthrough: NVIDIA Container Toolkit, deploy.resources in compose
+  - Default model: ollama/gemma4:latest (RTX 5090 available on dev machine)
+
+
+================================================================================
+  PROJECT STRUCTURE
+================================================================================
+
+SciLibrarian/
+├── backend/
+│   ├── app/
+│   │   ├── main.py              FastAPI app, lifespan (init_db + scheduler)
+│   │   ├── config.py            Pydantic settings (all env vars)
+│   │   ├── database.py          SQLAlchemy engine + init_db() + _MIGRATIONS list
+│   │   ├── dependencies.py      CurrentUser, DB annotated types
+│   │   ├── models/
+│   │   │   ├── user.py          User (username/password, no email)
+│   │   │   ├── project.py       Project, Digest, WatchRequest
+│   │   │   ├── collection.py    Collection (hierarchical, project-scoped)
+│   │   │   ├── reference.py     Reference, ReferenceTag (is_starred, read_status, notes)
+│   │   │   ├── review_queue.py  ReviewQueueItem (monitor discoveries)
+│   │   │   └── search_monitor.py SearchMonitor
+│   │   ├── routers/
+│   │   │   ├── auth.py          register/login/me (username-based, no email)
+│   │   │   ├── references.py    CRUD + upload/bulk/zip/reprocess + bibtex/file serve
+│   │   │   ├── collections.py   CRUD + tree endpoint (project-filtered)
+│   │   │   ├── projects.py      CRUD + digests + watch-requests + settings
+│   │   │   ├── librarian.py     /chat (streaming) + /models (live Ollama detection)
+│   │   │   ├── review.py        Queue + decide (full ingest) + monitors CRUD
+│   │   │   ├── search.py        Full-text search
+│   │   │   └── config.py        /status + /ollama/models
+│   │   └── services/
+│   │       ├── llm.py           Unified LLM: LiteLLM for cloud, direct API for Ollama
+│   │       ├── librarian.py     Alexandria agent (tool use: search/web/arxiv/fulltext)
+│   │       ├── ingestion.py     PDF+URL ingestion (PDF-aware URL routing)
+│   │       ├── extractors.py    Multi-format: CSV, Excel, PDB, FASTA, DOCX, etc.
+│   │       ├── proactive_search.py arXiv/SemanticScholar/OpenAlex/DuckDuckGo +
+│   │       │                    Alexandria relevance filtering + query expansion
+│   │       ├── digest.py        Monthly digest generation (project or collection scope)
+│   │       ├── project_setup.py Project onboarding (Alexandria designs collection taxonomy)
+│   │       ├── scheduler.py     APScheduler jobs (monitors, digest, email ingest)
+│   │       ├── email_ingest.py  IMAP polling for emailed PDFs/URLs
+│   │       ├── email_service.py SMTP digest delivery
+│   │       ├── embeddings.py    pgvector infrastructure (NOT YET WIRED — skeleton only)
+│   │       └── search.py        PostgreSQL full-text search
+│   ├── cli/main.py              Typer CLI (login, ingest, ingest-dir, ingest-urls, search, digest)
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx              Routes
+│   │   ├── api/client.js        Axios + all API methods (uses /api Vite proxy)
+│   │   ├── hooks/useProject.js  Active project hook (localStorage + projects query)
+│   │   ├── store/auth.jsx       AuthContext (user, login, logout)
+│   │   ├── components/
+│   │   │   ├── Sidebar.jsx      Navigation + collection tree + project switcher
+│   │   │   ├── Layout.jsx       Shell (sidebar + main + floating chat button)
+│   │   │   ├── LibrarianPanel.jsx Alexandria chat (streaming, model picker)
+│   │   │   ├── ReferenceCard.jsx Card with star/read toggle (optimistic updates)
+│   │   │   ├── CollectionTree.jsx Recursive tree for sidebar
+│   │   │   └── AddReferenceModal.jsx 4-tab modal: file/batch/URL/bulk URLs
+│   │   └── pages/
+│   │       ├── Dashboard.jsx    Stats, recent refs, queue preview
+│   │       ├── Library.jsx      Reference list + search + starred/unread filters
+│   │       ├── ReferencePage.jsx Detail + inline editing + PDF viewer + reprocess
+│   │       ├── CollectionsPage.jsx Tree editor (rename/add/delete inline)
+│   │       ├── ReviewQueue.jsx  Queue with full-ingest toggle
+│   │       ├── Monitors.jsx     CRUD + run-now
+│   │       ├── WatchRequests.jsx Natural-language interests (auto-creates monitor)
+│   │       ├── DigestPage.jsx   Generate + view digests (project or collection scope)
+│   │       ├── ConfigPage.jsx   Provider status + Ollama detection + model assignment
+│   │       ├── ProjectSetup.jsx Onboarding flow (Alexandria designs structure)
+│   │       ├── TagBrowser.jsx   Tag cloud + browse refs by tag
+│   │       ├── RestructurePage.jsx Alexandria restructure suggestions
+│   │       └── HowItWorks.jsx   Explainer page
+├── docs/
+│   ├── design-decisions.md      Architectural rationale (14+ decisions documented)
+│   ├── development-log.md       Per-cycle build log (Cycles 1-7)
+│   └── ollama-integration-investigation.md  Deep-dive on Ollama issues + fixes
+├── docker-compose.yml           Dev stack (db, backend, frontend, optional ollama)
+├── docker-compose.prod.yml      Production (nginx, 2 uvicorn workers)
+├── nginx/nginx.conf             Reverse proxy config (SSL, streaming support)
+├── .env.example                 All env vars documented
+├── CLAUDE.md                    Claude Code context file
+└── README.md                    Full user-facing documentation
+
+
+================================================================================
+  DATABASE SCHEMA (key points)
+================================================================================
+
+Tables: users, projects, collections, references, reference_tags,
+        review_queue, search_monitors, digests, watch_requests
+
+Schema management: NO Alembic. Uses SQLAlchemy create_all() + a _MIGRATIONS
+list in database.py that runs ALTER TABLE IF NOT EXISTS on startup.
+This is intentional (simple, self-healing) but means no migration history.
+
+Key design choices:
+  - 'references' is a reserved SQL word — must be double-quoted everywhere
+  - projects → collections → references (hierarchical, all project-scoped)
+  - All collections require project_id (added via migration, nullable)
+  - CollectionOut MUST be built with _col_to_out() — NOT model_validate()
+    because model_validate tries to access lazy SQLAlchemy relationships
+    and crashes with MissingGreenlet error in async context
+  - References have: is_starred (bool), read_status (unread/reading/read),
+    notes (text), full_text (text), file_path (local storage only)
+
+Auth: JWT, username+password only (no email required by design).
+      Tokens stored in localStorage (frontend).
+
+
+================================================================================
+  KNOWN ISSUES AND ROUGH EDGES
+================================================================================
+
+1. NO ALEMBIC — schema changes are manual ALTER TABLE statements in database.py
+   _MIGRATIONS list. This is fragile and doesn't track history. A proper
+   Alembic setup is a recommended improvement.
+
+2. EMBEDDINGS NOT WIRED — services/embeddings.py exists and pgvector dependency
+   is installed, but the Reference model has no embedding column yet and
+   get_embedding()/similarity_search() are never called. The infrastructure
+   is there; the migration and wiring are TODO.
+
+3. COLLECTION SCOPING INCOMPLETE — references have project_id but the list/search
+   endpoints don't always filter by current project. A user can see references
+   from other projects if they know the API directly.
+
+4. NO RATE LIMITING — the API has no rate limiting middleware. Any authenticated
+   user can hammer the LLM endpoints.
+
+5. API KEYS STORED IN DB — per-project API key overrides (Anthropic/OpenAI/Gemini)
+   are stored in plain text in project.settings JSON. Acceptable for internal
+   tool, not for multi-tenant SaaS.
+
+6. SCHEDULER RUNS IN-PROCESS — APScheduler runs inside the uvicorn process.
+   With --workers 2 (production), each worker would run its own scheduler,
+   causing duplicate monitor runs. Production should use a single worker or
+   an external task queue (Celery/ARQ).
+
+7. UPLOADS ON LOCAL FILESYSTEM — PDFs stored at /app/uploads (Docker volume).
+   Production should move to S3/GCS. The file_path column stores absolute
+   container paths which will break if the volume moves.
+
+8. FULL TEXT TRUNCATED AT 50,000 CHARS — long PDFs are cut. The truncation
+   happens in extract_pdf_text() and is intentional (LLM context limits) but
+   means the search index and librarian don't see the full paper.
+
+9. CORS IS WIDE OPEN IN DEVELOPMENT — allow_origins=["*"] in development mode.
+   Tighten for production (update main.py CORS config).
+
+10. FRONTEND USES LOCALSTORAGE FOR AUTH TOKEN — standard approach but vulnerable
+    to XSS. HttpOnly cookies would be more secure.
+
+11. useProject() HOOK RE-FETCHES PROJECTS INDEPENDENTLY — multiple components
+    call useProject() which all issue a GET /projects query. TanStack Query
+    caches these (same queryKey), so it's not N requests, but the hook is
+    used in Sidebar AND individual pages, creating mild coupling.
+
+12. CollectionOut HAS children FIELD — this field is only populated by the
+    /tree endpoint. The flat /collections endpoint returns children=[] always.
+    This is technically correct but confusing schema design.
+
+13. REVIEW QUEUE FULL INGEST IS SLOW — each approved URL item runs the full
+    ingestion pipeline (15-30s). Bulk approve with full ingest on 20 items
+    will take 5-10 minutes and hold the HTTP connection. Should be a
+    background job with progress streaming.
+
+
+================================================================================
+  AREAS TO FOCUS REVIEW ON
+================================================================================
+
+Priority 1 (correctness + reliability):
+  - backend/app/routers/references.py: route ordering (/stats/summary must
+    appear before /{ref_id} to prevent "stats" being parsed as int)
+  - backend/app/services/llm.py: Ollama direct API path — error handling,
+    timeout behaviour, what happens when Ollama is slow/unavailable
+  - backend/app/services/ingestion.py: the new PDF-aware URL routing —
+    edge cases (redirects, auth-gated PDFs, non-standard content-types)
+  - backend/app/database.py: _MIGRATIONS running at every startup is safe
+    (IF NOT EXISTS) but any error in a migration is silently swallowed
+
+Priority 2 (security):
+  - auth.py: JWT handling, token expiry, no refresh tokens
+  - dependencies.py: current_user extraction
+  - Any SQL injection vectors (SQLAlchemy ORM should prevent but verify)
+  - File upload handling in references.py (path traversal, MIME spoofing)
+
+Priority 3 (performance):
+  - Collections tree endpoint: loads all children recursively with N+1 queries
+    (one query per node). For deep/wide trees this degrades. A CTE-based
+    recursive query would fix this.
+  - proactive_search.py: Alexandria relevance filter adds one LLM call per
+    monitor run. With slow Ollama models this could time out.
+  - Library page: fetches up to 200 references client-side then filters.
+    Should be server-side pagination + filtering.
+
+Priority 4 (code quality):
+  - Error handling consistency: some routers catch all exceptions silently,
+    others propagate. A global exception handler would help.
+  - Type hints: backend is mostly typed but some services have Optional without
+    proper None checks
+  - Frontend: no TypeScript (plain JSX). Some components are getting large
+    (AddReferenceModal.jsx, ReferencePage.jsx) and could be split.
+
+
+================================================================================
+  HOW TO RUN (for testing during review)
+================================================================================
+
+Prerequisites: Docker, Docker Compose, NVIDIA Container Toolkit (for GPU)
+
+Quick start:
+  git clone git@github.com:mkuiper/SciLibrarian.git
+  cd SciLibrarian
+  cp .env.example .env
+  # Edit .env: add ANTHROPIC_API_KEY or leave empty to use Ollama only
+  docker-compose --profile ollama up --build
+  # Frontend: http://localhost:5173
+  # API docs: http://localhost:8000/docs
+
+With Ollama (host models already downloaded at /usr/share/ollama/.ollama):
+  OLLAMA_BASE_URL=http://ollama:11434 (default in .env)
+  The ollama service mounts /usr/share/ollama/.ollama for instant model access
+
+Without Ollama (cloud API only):
+  docker-compose up --build
+  Set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env
+
+Register at http://localhost:5173/register (no email needed, just username+password)
+Create a project — Alexandria will design your collection structure using the
+configured model.
+
+Run tests manually:
+  Backend API: http://localhost:8000/docs (Swagger UI)
+  Health check: curl http://localhost:8000/health
+
+
+================================================================================
+  DESIGN PHILOSOPHY (why things are the way they are)
+================================================================================
+
+Full rationale in docs/design-decisions.md. Key points:
+
+- Bypass LiteLLM for Ollama: LiteLLM's ollama provider can't pass think=false,
+  causing streaming failures on qwen3/deepseek-r1 models. Direct /api/chat works.
+
+- No Alembic: chosen for simplicity (ALTER TABLE IF NOT EXISTS is idempotent).
+  Tech debt that should be addressed before any team collaboration on schema.
+
+- No email required for auth: privacy decision. Username+password only.
+
+- Human review queue: all monitor discoveries require approval before entering
+  the library. Quality over volume — automated ingestion without review erodes
+  trust in the library.
+
+- Multi-provider via LiteLLM: allows the same codebase to work with Claude
+  (cloud), GPT-4o (cloud), Gemini (cloud), or fully local Ollama models.
+  Default is ollama/gemma4:latest since the dev machine has an RTX 5090.
+
+- PDF-aware URL ingestion: arXiv URLs from monitors point to abstract pages or
+  PDFs. The ingestion layer auto-detects and routes to the correct pipeline.
+  History: this was a bug for several days — references from monitors had
+  0 text until this was fixed.
+
+
+================================================================================
+  USEFUL COMMANDS FOR THE REVIEWING AGENT
+================================================================================
+
+# Check what's actually in the DB
+docker exec scilibraian-backend-1 python3 -c "
+import asyncio
+from app.database import AsyncSessionLocal
+from sqlalchemy import text
+async def q(sql):
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(text(sql))
+        for row in r: print(row)
+asyncio.run(q('SELECT id, title, length(full_text), length(summary) FROM \"references\" ORDER BY id DESC LIMIT 10'))
+"
+
+# Watch backend logs live
+docker logs scilibraian-backend-1 -f 2>&1
+
+# Run a quick API test (replace TOKEN)
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"mike","password":"YOUR_PASSWORD"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+curl -s http://localhost:8000/projects -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+
+# Check Ollama connectivity from backend container
+docker exec scilibraian-backend-1 python3 -c "
+import asyncio, httpx
+async def t():
+    async with httpx.AsyncClient(timeout=3) as c:
+        r = await c.get('http://ollama:11434/api/tags')
+        import json; models = json.loads(r.text)['models']
+        print(f'{len(models)} models available')
+        for m in models: print(f'  {m[\"name\"]}')
+asyncio.run(t())
+"
+
+================================================================================
+  END OF NOTES
+================================================================================
