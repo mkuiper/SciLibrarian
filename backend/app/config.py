@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # Semantic Scholar API key (optional, increases rate limit)
     semantic_scholar_api_key: str = ""
 
+    # Brave Search API key (optional but recommended for web search)
+    # Free tier: 2000 queries/month, no credit card needed
+    # Sign up: https://api.search.brave.com/
+    # Without this, web search falls back to DuckDuckGo which rate-limits aggressively
+    brave_search_api_key: str = ""
+
     # Email / SMTP (for digest mailing list and reply confirmations)
     smtp_host: str = ""
     smtp_port: int = 587

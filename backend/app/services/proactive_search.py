@@ -175,26 +175,86 @@ def _reconstruct_abstract(inverted_index: dict | None) -> str:
 
 async def search_web(query: str, max_results: int = 10) -> list[dict]:
     """
-    DuckDuckGo web search — great for government policy docs, news, reports.
-    No API key needed. Uses the duckduckgo-search Python package.
+    Web search for policy docs, model cards, news, reports.
+    Uses Brave Search API if BRAVE_SEARCH_API_KEY is set (recommended —
+    more reliable from server/Docker environments). Falls back to DuckDuckGo.
+
+    Note: DuckDuckGo aggressively rate-limits server IPs. If monitors return
+    few web results, set BRAVE_SEARCH_API_KEY in .env (free tier: 2000/month).
     """
+    if settings.brave_search_api_key:
+        return await _search_brave(query, max_results)
+    return await _search_duckduckgo(query, max_results)
+
+
+async def _search_brave(query: str, max_results: int) -> list[dict]:
+    """Brave Search API — reliable, no rate-limit issues, free tier 2000/month."""
     try:
-        from duckduckgo_search import DDGS
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={"q": query, "count": min(max_results, 20)},
+                headers={
+                    "Accept": "application/json",
+                    "Accept-Encoding": "gzip",
+                    "X-Subscription-Token": settings.brave_search_api_key,
+                },
+            )
+        if resp.status_code != 200:
+            logger.warning(f"Brave Search returned {resp.status_code} for '{query[:50]}'")
+            return []
         results = []
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=max_results):
-                results.append({
-                    "title": r.get("title", ""),
-                    "abstract": r.get("body", ""),
-                    "authors": None,
-                    "year": None,
-                    "url": r.get("href"),
-                    "source": "web",
-                })
+        for r in resp.json().get("web", {}).get("results", []):
+            results.append({
+                "title": r.get("title", ""),
+                "abstract": r.get("description", ""),
+                "authors": None,
+                "year": None,
+                "url": r.get("url"),
+                "source": "web",
+            })
         return results
     except Exception as e:
-        logger.debug(f"DuckDuckGo search failed: {e}")
+        logger.debug(f"Brave Search failed: {e}")
         return []
+
+
+async def _search_duckduckgo(query: str, max_results: int) -> list[dict]:
+    """DuckDuckGo async search with retry on rate limit."""
+    import asyncio
+    try:
+        from duckduckgo_search import AsyncDDGS
+        from duckduckgo_search.exceptions import RatelimitException
+    except ImportError:
+        logger.debug("duckduckgo_search not available")
+        return []
+
+    for attempt in range(3):
+        try:
+            async with AsyncDDGS() as ddgs:
+                raw = await ddgs.atext(query, max_results=max_results)
+            return [{
+                "title": r.get("title", ""),
+                "abstract": r.get("body", ""),
+                "authors": None,
+                "year": None,
+                "url": r.get("href"),
+                "source": "web",
+            } for r in (raw or [])]
+        except RatelimitException:
+            if attempt < 2:
+                wait = 3 * (2 ** attempt)  # 3s, 6s
+                logger.debug(f"DuckDuckGo rate limited, retrying in {wait}s...")
+                await asyncio.sleep(wait)
+            else:
+                logger.warning(
+                    f"DuckDuckGo rate limited after 3 attempts for '{query[:50]}'. "
+                    "Set BRAVE_SEARCH_API_KEY in .env for reliable web search."
+                )
+        except Exception as e:
+            logger.debug(f"DuckDuckGo search failed: {e}")
+            break
+    return []
 
 
 async def search_huggingface(query: str, max_results: int = 10) -> list[dict]:
