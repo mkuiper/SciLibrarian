@@ -181,6 +181,59 @@ async def update_reference(ref_id: int, data: ReferenceUpdate, db: DB, current_u
     return result.scalar_one()
 
 
+@router.post("/{ref_id}/reprocess", response_model=ReferenceOut)
+async def reprocess_reference(
+    ref_id: int,
+    db: DB,
+    current_user: CurrentUser,
+    model: str = "claude-sonnet-4-6",
+):
+    """
+    Re-run the full ingestion pipeline on an existing reference.
+    Useful for references added from the review queue that got empty text,
+    or to regenerate summaries with a better model.
+    """
+    result = await db.execute(select(Reference).options(selectinload(Reference.tags)).where(Reference.id == ref_id))
+    ref = result.scalar_one_or_none()
+    if not ref:
+        raise HTTPException(status_code=404, detail="Reference not found")
+
+    meta = None
+    if ref.file_path and Path(ref.file_path).exists():
+        # Re-ingest from stored PDF
+        file_bytes = Path(ref.file_path).read_bytes()
+        meta = await ingestion.ingest_pdf(file_bytes, ref.file_name or "document.pdf", model)
+    elif ref.url:
+        # Re-ingest from URL (now PDF-aware)
+        meta = await ingestion.ingest_url(ref.url, model)
+
+    if not meta:
+        raise HTTPException(status_code=400, detail="No file or URL to reprocess")
+
+    # Update fields
+    for field in ["title", "authors", "year", "source_type", "abstract", "summary", "full_text", "extra_metadata"]:
+        val = meta.get(field)
+        if val:
+            setattr(ref, field, val)
+
+    if meta.get("file_path") and not ref.file_path:
+        ref.file_path = meta["file_path"]
+        ref.file_name = meta.get("file_name")
+
+    # Replace tags
+    for tag in ref.tags:
+        await db.delete(tag)
+    await db.flush()
+    for tag in meta.get("tags", []):
+        if tag.strip():
+            db.add(ReferenceTag(reference_id=ref.id, tag=tag.strip().lower()))
+
+    await db.flush()
+    await db.refresh(ref)
+    result = await db.execute(select(Reference).options(selectinload(Reference.tags)).where(Reference.id == ref.id))
+    return result.scalar_one()
+
+
 @router.delete("/{ref_id}", status_code=204)
 async def delete_reference(ref_id: int, db: DB, current_user: CurrentUser):
     result = await db.execute(select(Reference).where(Reference.id == ref_id))

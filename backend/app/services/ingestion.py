@@ -85,10 +85,32 @@ async def extract_pdf_text(file_bytes: bytes) -> str:
     return text.replace("\x00", "")[:50000]
 
 
-async def extract_url_text(url: str) -> tuple[str, str]:
-    async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
-        resp = await client.get(url, headers={"User-Agent": "SciLibrarian/1.0 (research tool)"})
+ARXIV_ABS  = re.compile(r'https?://arxiv\.org/abs/(\d{4}\.\d{4,5}(?:v\d+)?)')
+ARXIV_PDF  = re.compile(r'https?://arxiv\.org/pdf/(\d{4}\.\d{4,5}(?:v\d+)?)(?:\.pdf)?')
+DOI_URL    = re.compile(r'https?://(?:dx\.)?doi\.org/(.+)')
+
+
+def _arxiv_pdf_url(arxiv_id: str) -> str:
+    return f"https://arxiv.org/pdf/{arxiv_id}"
+
+
+def _is_pdf_response(resp) -> bool:
+    ct = resp.headers.get("content-type", "").lower()
+    return "pdf" in ct or resp.content[:4] == b"%PDF"
+
+
+async def _fetch(url: str, timeout: int = 60) -> httpx.Response:
+    async with httpx.AsyncClient(
+        follow_redirects=True, timeout=timeout,
+        headers={"User-Agent": "SciLibrarian/1.0 (research tool)"}
+    ) as client:
+        resp = await client.get(url)
         resp.raise_for_status()
+        return resp
+
+
+async def extract_url_text(url: str) -> tuple[str, str]:
+    resp = await _fetch(url)
     soup = BeautifulSoup(resp.text, "lxml")
     for tag in soup(["script", "style", "nav", "footer", "header"]):
         tag.decompose()
@@ -171,11 +193,81 @@ async def ingest_file(file_bytes: bytes, filename: str, model: str = "claude-son
     return {k: _clean(v) for k, v in meta.items()}
 
 
+async def _ingest_pdf_bytes_from_url(pdf_url: str, filename: str, original_url: str, model: str) -> dict | None:
+    """Download a URL and process it as a PDF if it really is one. Returns None on failure."""
+    try:
+        resp = await _fetch(pdf_url, timeout=60)
+        if _is_pdf_response(resp):
+            meta = await ingest_pdf(resp.content, filename, model)
+            meta["url"] = original_url  # keep the canonical URL
+            return meta
+    except Exception:
+        pass
+    return None
+
+
 async def ingest_url(url: str, model: str = "claude-sonnet-4-6") -> dict:
-    title, text = await extract_url_text(url)
+    """
+    Smart URL ingestion that handles:
+    - arXiv abstract pages → automatically fetch the PDF
+    - arXiv PDF URLs → download and process via PDF pipeline
+    - Direct PDF URLs (.pdf extension or PDF content-type) → PDF pipeline
+    - DOI URLs → resolve and try PDF
+    - Everything else → HTML scraping
+    """
+    # ── arXiv abstract page ──────────────────────────────────────────────────
+    m = ARXIV_ABS.match(url)
+    if m:
+        arxiv_id = m.group(1)
+        pdf_url = _arxiv_pdf_url(arxiv_id)
+        meta = await _ingest_pdf_bytes_from_url(pdf_url, f"arxiv_{arxiv_id}.pdf", url, model)
+        if meta:
+            return meta
+        # Fall back to abstract page scraping
+        title, text = await extract_url_text(url)
+        meta = await generate_metadata(text, title, model)
+        meta.update(url=url, full_text=text)
+        return {k: _clean(v) for k, v in meta.items()}
+
+    # ── arXiv PDF URL ────────────────────────────────────────────────────────
+    m = ARXIV_PDF.match(url)
+    if m:
+        arxiv_id = m.group(1)
+        canonical = f"https://arxiv.org/abs/{arxiv_id}"
+        meta = await _ingest_pdf_bytes_from_url(url, f"arxiv_{arxiv_id}.pdf", canonical, model)
+        if meta:
+            return meta
+
+    # ── Any URL that ends with .pdf or responds with PDF content-type ────────
+    if url.lower().endswith(".pdf") or "/pdf/" in url.lower():
+        fname = url.split("/")[-1] or "paper.pdf"
+        if not fname.lower().endswith(".pdf"):
+            fname += ".pdf"
+        meta = await _ingest_pdf_bytes_from_url(url, fname, url, model)
+        if meta:
+            return meta
+
+    # ── Try fetching: if it turns out to be a PDF, route to PDF pipeline ─────
+    try:
+        resp = await _fetch(url, timeout=45)
+        if _is_pdf_response(resp):
+            fname = url.split("/")[-1] or "document.pdf"
+            if not fname.lower().endswith(".pdf"):
+                fname += ".pdf"
+            meta = await ingest_pdf(resp.content, fname, model)
+            meta["url"] = url
+            return meta
+        # It's HTML — parse it
+        soup = BeautifulSoup(resp.text, "lxml")
+        for tag in soup(["script", "style", "nav", "footer", "header"]):
+            tag.decompose()
+        title = soup.title.string.strip() if soup.title else ""
+        text = soup.get_text(separator="\n", strip=True)[:50000]
+    except Exception:
+        title, text = "", ""
+
     meta = await generate_metadata(text, title, model)
-    meta["url"] = url
-    meta["full_text"] = text
+    meta.update(url=url, full_text=text)
     return {k: _clean(v) for k, v in meta.items()}
 
 

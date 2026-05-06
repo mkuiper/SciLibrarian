@@ -71,6 +71,10 @@ export const referencesApi = {
   }),
   fromUrlsBulk: (data) => api.post('/references/from-urls-bulk', data, { timeout: 600000 }),
   update: (id, data) => api.patch(`/references/${id}`, data),
+  reprocess: (id, model) => api.post(`/references/${id}/reprocess`, null, {
+    params: model ? { model } : {},
+    timeout: 120000,
+  }),
   delete: (id) => api.delete(`/references/${id}`),
   fileUrl: (id) => `${BASE}/references/${id}/file`,
   bibtexUrl: (id) => `${BASE}/references/${id}/bibtex`,

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { referencesApi, collectionsApi } from '../api/client'
-import { ArrowLeft, ExternalLink, FileText, Trash2, Loader2, Copy, Download, ChevronDown, ChevronUp, Pencil, Check, X, Star, Eye, Clock, CheckCircle, StickyNote } from 'lucide-react'
+import { ArrowLeft, ExternalLink, FileText, Trash2, Loader2, Copy, Download, ChevronDown, ChevronUp, Pencil, Check, X, Star, Eye, Clock, CheckCircle, StickyNote, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const TYPE_COLORS = {
@@ -219,6 +219,22 @@ export default function ReferencePage() {
     }
   }
 
+  const [reprocessing, setReprocessing] = useState(false)
+
+  const handleReprocess = async () => {
+    setReprocessing(true)
+    try {
+      await referencesApi.reprocess(refId)
+      queryClient.invalidateQueries({ queryKey: ['reference', refId] })
+      queryClient.invalidateQueries({ queryKey: ['references'] })
+      toast.success('Reprocessed — summary and tags updated')
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Reprocessing failed')
+    } finally {
+      setReprocessing(false)
+    }
+  }
+
   const handleDelete = async () => {
     if (!confirm('Delete this reference?')) return
     try {
@@ -297,6 +313,15 @@ export default function ReferencePage() {
                 Open
               </a>
             )}
+            <button
+              onClick={handleReprocess}
+              disabled={reprocessing}
+              className="btn-secondary text-xs"
+              title="Re-run full ingestion (fetch PDF, regenerate summary & tags)"
+            >
+              {reprocessing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              {reprocessing ? 'Processing...' : 'Reprocess'}
+            </button>
             <button onClick={handleDelete} className="btn-ghost text-red-400 hover:text-red-600">
               <Trash2 size={14} />
             </button>
@@ -357,6 +382,20 @@ export default function ReferencePage() {
           ) : null}
           <CopyButton text={ref.title} label="Copy title" />
         </div>
+
+        {/* Warning for empty references */}
+        {!ref.summary && !ref.full_text && (
+          <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+            <span className="text-amber-500 text-lg flex-shrink-0">⚠</span>
+            <div>
+              <p className="text-sm font-medium text-amber-800">This reference has no extracted content</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                It may have been added from the review queue before the PDF-aware ingestion was set up.
+                Click <strong>Reprocess</strong> above to fetch the full text and generate a summary now.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Alexandria summary */}
         <div className="mb-6">
