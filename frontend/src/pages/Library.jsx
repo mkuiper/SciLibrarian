@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 
 const SOURCE_TYPES = ['paper', 'policy', 'model_card', 'evaluation', 'government', 'news', 'other']
 
-function NewCollectionForm({ parentId, onDone }) {
+function NewCollectionForm({ parentId, projectId, onDone }) {
   const [name, setName] = useState('')
   const [desc, setDesc] = useState('')
   const [loading, setLoading] = useState(false)
@@ -103,7 +103,7 @@ export default function Library() {
       </div>
 
       {showNewCol && (
-        <NewCollectionForm parentId={colId} onDone={() => setShowNewCol(false)} />
+        <NewCollectionForm parentId={colId} projectId={projectId} onDone={() => setShowNewCol(false)} />
       )}
 
       <div className="flex gap-3 mb-6">

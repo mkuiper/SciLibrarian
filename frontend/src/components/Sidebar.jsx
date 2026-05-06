@@ -7,7 +7,7 @@ import CollectionTree from './CollectionTree'
 import {
   BookOpen, LayoutDashboard, Inbox, Radio,
   Plus, ChevronDown, ChevronRight, LogOut, FolderPlus,
-  Sparkles, Settings, Eye, LayoutGrid, SlidersHorizontal, FolderTree,
+  Sparkles, Eye, LayoutGrid, SlidersHorizontal, FolderTree,
 } from 'lucide-react'
 
 const navItem = 'flex items-center gap-2.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors'
@@ -19,13 +19,7 @@ export default function Sidebar() {
   const navigate = useNavigate()
   const [collectionsOpen, setCollectionsOpen] = useState(true)
 
-  const currentProjectId = currentProject?.id
-
-  const { data: tree = [] } = useQuery({
-    queryKey: ['collections-tree', currentProjectId],
-    queryFn: () => collectionsApi.tree(currentProjectId).then(r => r.data),
-  })
-
+  // Projects must be loaded before currentProject and currentProjectId are computed
   const { data: projects = [] } = useQuery({
     queryKey: ['projects'],
     queryFn: () => projectsApi.list().then(r => r.data),
@@ -36,12 +30,18 @@ export default function Sidebar() {
     return stored ? parseInt(stored) : null
   })
 
-  const currentProject = projects.find(p => p.id === activeProjectId) || projects[0]
+  const currentProject = projects.find(p => p.id === activeProjectId) || projects[0] || null
+  const currentProjectId = currentProject?.id || null
 
   const switchProject = (id) => {
     setActiveProjectId(id)
     localStorage.setItem('active_project_id', String(id))
   }
+
+  const { data: tree = [] } = useQuery({
+    queryKey: ['collections-tree', currentProjectId],
+    queryFn: () => collectionsApi.tree(currentProjectId).then(r => r.data),
+  })
 
   return (
     <aside className="w-64 flex-shrink-0 bg-slate-900 flex flex-col h-full">
@@ -101,6 +101,9 @@ export default function Sidebar() {
         <NavLink to="/restructure" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
           <LayoutGrid size={16} />Restructure
         </NavLink>
+        <NavLink to="/how-it-works" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
+          <BookOpen size={16} />How it works
+        </NavLink>
 
         <div className="pt-4">
           <button
@@ -119,11 +122,11 @@ export default function Sidebar() {
                 <CollectionTree nodes={tree} depth={0} />
               )}
               <button
-                onClick={() => navigate('/library')}
+                onClick={() => navigate('/collections')}
                 className="flex items-center gap-2 w-full px-3 py-1.5 text-slate-500 hover:text-slate-300 text-xs mt-1 transition-colors"
               >
                 <FolderPlus size={12} />
-                New collection
+                Manage collections
               </button>
             </div>
           )}
@@ -137,9 +140,6 @@ export default function Sidebar() {
         >
           <Plus size={16} />New Project
         </button>
-        <NavLink to="/how-it-works" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
-          <BookOpen size={16} />How it works
-        </NavLink>
         <NavLink to="/config" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
           <SlidersHorizontal size={16} />Configuration
         </NavLink>
