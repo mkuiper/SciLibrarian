@@ -107,7 +107,8 @@ export default function AddReferenceModal({ onClose, collectionId: initialCollec
     queryFn: () => collectionsApi.list(projectId).then(r => r.data),
   })
 
-  const effectiveModel = model || projects[0]?.settings?.ingestion_model || 'ollama/gemma4:latest'
+  const currentProject = projects.find(p => p.id === projectId)
+  const effectiveModel = model || currentProject?.settings?.ingestion_model || 'ollama/gemma4:latest'
   const allModels = Object.entries(modelGroups).flatMap(([provider, ms]) =>
     ms.map(m => ({ ...m, provider }))
   )
