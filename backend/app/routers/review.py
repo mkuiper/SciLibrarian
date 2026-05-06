@@ -100,7 +100,8 @@ async def _approve_item(
                 created_by=user_id,
                 extra_metadata=meta.get("extra_metadata"),
             )
-            await db.flush()
+            db.add(ref)
+            await db.flush()  # populates ref.id before tag inserts
             for tag in meta.get("tags", []):
                 if tag.strip():
                     db.add(ReferenceTag(reference_id=ref.id, tag=tag.strip().lower()))

@@ -199,12 +199,11 @@ async def search_web(query: str, max_results: int = 10) -> list[dict]:
 
 async def search_huggingface(query: str, max_results: int = 10) -> list[dict]:
     """
-    Hugging Face model hub search — returns model cards, datasets and spaces.
-    Free REST API, no key required. Best source for AI model cards.
+    Hugging Face model hub search — returns community model cards.
+    Note: proprietary models (Claude, GPT-4, Gemini) are NOT on HuggingFace.
+    Best for: open-weight models, fine-tunes, community evaluations.
     """
     results = []
-
-    # Search models
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(
@@ -212,23 +211,33 @@ async def search_huggingface(query: str, max_results: int = 10) -> list[dict]:
                 params={"search": query, "limit": max_results, "full": "true"},
                 headers={"User-Agent": "SciLibrarian/1.0"},
             )
-        if resp.status_code == 200:
-            for m in resp.json():
-                model_id = m.get("modelId") or m.get("id", "")
-                description = (m.get("cardData") or {}).get("description") or ""
-                tags = m.get("tags") or []
-                abstract = description or (", ".join(tags[:10]) if tags else "")
-                results.append({
-                    "title": f"Model card: {model_id}",
-                    "abstract": abstract,
-                    "authors": m.get("author") or m.get("authorData", {}).get("fullname"),
-                    "year": None,
-                    "url": f"https://huggingface.co/{model_id}",
-                    "source": "huggingface",
-                })
+        if resp.status_code != 200:
+            return []
+        for m in resp.json():
+            model_id = m.get("id", "")
+            if not model_id:
+                continue
+            author = m.get("author", "")
+            pipeline_tag = m.get("pipeline_tag") or ""
+            tags = m.get("tags") or []
+            # Build a useful description from available metadata
+            # (cardData is not returned by the public API)
+            content_tags = [t for t in tags if not t.startswith(("license:", "language:", "dataset:"))][:8]
+            abstract_parts = []
+            if pipeline_tag:
+                abstract_parts.append(f"Task: {pipeline_tag}")
+            if content_tags:
+                abstract_parts.append(f"Tags: {', '.join(content_tags)}")
+            results.append({
+                "title": f"HF model: {model_id}",
+                "abstract": ". ".join(abstract_parts),
+                "authors": author or None,
+                "year": None,
+                "url": f"https://huggingface.co/{model_id}",
+                "source": "huggingface",
+            })
     except Exception as e:
         logger.debug(f"Hugging Face model search failed: {e}")
-
     return results
 
 
