@@ -164,10 +164,13 @@ async def update_reference(ref_id: int, data: ReferenceUpdate, db: DB, current_u
     if not ref:
         raise HTTPException(status_code=404, detail="Reference not found")
 
-    for field in ["title", "authors", "year", "source_type", "abstract", "summary", "url", "collection_id"]:
+    for field in ["title", "authors", "year", "source_type", "abstract", "summary",
+                  "url", "collection_id", "notes", "read_status"]:
         val = getattr(data, field, None)
         if val is not None:
             setattr(ref, field, val)
+    if data.is_starred is not None:
+        ref.is_starred = data.is_starred
 
     if data.tags is not None:
         await _attach_tags(db, ref, data.tags)

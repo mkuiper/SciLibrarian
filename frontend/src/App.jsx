@@ -16,6 +16,7 @@ import WatchRequests from './pages/WatchRequests'
 import RestructurePage from './pages/RestructurePage'
 import CollectionsPage from './pages/CollectionsPage'
 import HowItWorks from './pages/HowItWorks'
+import TagBrowser from './pages/TagBrowser'
 
 function PrivateRoute({ children }) {
   const { user } = useAuth()
@@ -51,6 +52,7 @@ export default function App() {
             <Route path="restructure" element={<RestructurePage />} />
             <Route path="collections" element={<CollectionsPage />} />
             <Route path="how-it-works" element={<HowItWorks />} />
+            <Route path="tags" element={<TagBrowser />} />
           </Route>
         </Routes>
       </BrowserRouter>

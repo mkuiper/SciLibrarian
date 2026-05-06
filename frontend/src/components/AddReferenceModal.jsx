@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { referencesApi, librarianApi, projectsApi } from '../api/client'
-import { X, Upload, Link, Loader2, FileText, FolderOpen, List, CheckCircle, AlertCircle } from 'lucide-react'
+import { referencesApi, librarianApi, projectsApi, collectionsApi } from '../api/client'
+import { X, Upload, Link, Loader2, FileText, FolderOpen, List, CheckCircle, AlertCircle, FolderPlus } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const TABS = [
@@ -50,7 +50,33 @@ function BatchResults({ results }) {
   )
 }
 
-export default function AddReferenceModal({ onClose, collectionId, projectId }) {
+function InlineNewCollection({ projectId, onCreated }) {
+  const [name, setName] = useState('')
+  const [loading, setLoading] = useState(false)
+  const queryClient = useQueryClient()
+  const submit = async (e) => {
+    e.preventDefault()
+    if (!name.trim()) return
+    setLoading(true)
+    try {
+      const { data } = await collectionsApi.create({ name: name.trim(), project_id: projectId })
+      queryClient.invalidateQueries({ queryKey: ['collections-flat'] })
+      queryClient.invalidateQueries({ queryKey: ['collections-tree'] })
+      onCreated(data)
+      setName('')
+    } catch { } finally { setLoading(false) }
+  }
+  return (
+    <form onSubmit={submit} className="flex gap-1 mt-1">
+      <input className="input text-xs flex-1 py-1" placeholder="New collection name" value={name} onChange={e => setName(e.target.value)} autoFocus />
+      <button type="submit" disabled={loading} className="btn-primary text-xs px-2 py-1">
+        {loading ? <Loader2 size={11} className="animate-spin" /> : 'Create'}
+      </button>
+    </form>
+  )
+}
+
+export default function AddReferenceModal({ onClose, collectionId: initialCollectionId, projectId }) {
   const [tab, setTab] = useState('pdf')
   const [url, setUrl] = useState('')
   const [bulkUrls, setBulkUrls] = useState('')
@@ -60,6 +86,9 @@ export default function AddReferenceModal({ onClose, collectionId, projectId }) 
   const [zipFile, setZipFile] = useState(null)
   const [loading, setLoading] = useState(false)
   const [batchResults, setBatchResults] = useState(null)
+  const [selectedCollectionId, setSelectedCollectionId] = useState(initialCollectionId || '')
+  const [showNewCol, setShowNewCol] = useState(false)
+  const collectionId = selectedCollectionId || initialCollectionId
   const fileRef = useRef()
   const multiRef = useRef()
   const zipRef = useRef()
@@ -73,8 +102,12 @@ export default function AddReferenceModal({ onClose, collectionId, projectId }) 
     queryKey: ['projects'],
     queryFn: () => projectsApi.list().then(r => r.data),
   })
+  const { data: collections = [] } = useQuery({
+    queryKey: ['collections-flat', projectId],
+    queryFn: () => collectionsApi.list(projectId).then(r => r.data),
+  })
 
-  const effectiveModel = model || projects[0]?.settings?.ingestion_model || 'claude-sonnet-4-6'
+  const effectiveModel = model || projects[0]?.settings?.ingestion_model || 'ollama/gemma4:latest'
   const allModels = Object.entries(modelGroups).flatMap(([provider, ms]) =>
     ms.map(m => ({ ...m, provider }))
   )
@@ -305,7 +338,31 @@ export default function AddReferenceModal({ onClose, collectionId, projectId }) 
           )}
 
           {/* Model selector */}
+          {/* Collection picker */}
           <div className="mt-4">
+            <div className="flex items-center justify-between mb-1">
+              <label className="label mb-0">Add to collection <span className="text-gray-400 font-normal">(optional)</span></label>
+              <button type="button" onClick={() => setShowNewCol(v => !v)} className="text-xs text-alexandria-600 hover:underline flex items-center gap-1">
+                <FolderPlus size={11} />New
+              </button>
+            </div>
+            <select
+              className="input text-sm"
+              value={selectedCollectionId}
+              onChange={e => setSelectedCollectionId(e.target.value)}
+            >
+              <option value="">Uncategorised</option>
+              {collections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            {showNewCol && (
+              <InlineNewCollection
+                projectId={projectId}
+                onCreated={(col) => { setSelectedCollectionId(col.id); setShowNewCol(false) }}
+              />
+            )}
+          </div>
+
+          <div className="mt-3">
             <label className="label">Processing model</label>
             <select value={model} onChange={e => setModel(e.target.value)} className="input text-sm">
               <option value="">Project default ({projects[0]?.settings?.ingestion_model || 'claude-sonnet-4-6'})</option>

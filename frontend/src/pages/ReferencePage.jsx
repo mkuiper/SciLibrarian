@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { referencesApi, collectionsApi } from '../api/client'
-import { ArrowLeft, ExternalLink, FileText, Trash2, Loader2, Copy, Download, ChevronDown, ChevronUp, Pencil, Check, X } from 'lucide-react'
+import { ArrowLeft, ExternalLink, FileText, Trash2, Loader2, Copy, Download, ChevronDown, ChevronUp, Pencil, Check, X, Star, Eye, Clock, CheckCircle, StickyNote } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const TYPE_COLORS = {
@@ -303,6 +303,38 @@ export default function ReferencePage() {
           </div>
         </div>
 
+        {/* Star / Read status */}
+        <div className="flex items-center gap-2 mb-5 pb-4 border-b border-gray-100">
+          <button
+            onClick={() => update('is_starred', !ref.is_starred)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border ${
+              ref.is_starred ? 'bg-amber-50 text-amber-700 border-amber-300' : 'border-gray-200 text-gray-500 hover:border-amber-200'
+            }`}
+          >
+            <Star size={14} fill={ref.is_starred ? 'currentColor' : 'none'} />
+            {ref.is_starred ? 'Starred' : 'Star'}
+          </button>
+
+          {[
+            { status: 'unread',  icon: Eye,          label: 'Unread',   color: 'text-gray-500' },
+            { status: 'reading', icon: Clock,         label: 'Reading',  color: 'text-amber-600' },
+            { status: 'read',    icon: CheckCircle,   label: 'Read',     color: 'text-emerald-600' },
+          ].map(({ status, icon: Icon, label, color }) => (
+            <button
+              key={status}
+              onClick={() => update('read_status', status)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border ${
+                ref.read_status === status
+                  ? 'bg-gray-100 border-gray-300 ' + color
+                  : 'border-gray-200 text-gray-400 hover:border-gray-300'
+              }`}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
+        </div>
+
         {/* Export / copy actions */}
         <div className="flex flex-wrap gap-1 mb-6 pb-4 border-b border-gray-100">
           <CopyButton text={plainCitation(ref)} label="Copy citation" />
@@ -375,6 +407,21 @@ export default function ReferencePage() {
             </dl>
           </div>
         )}
+
+        {/* Personal notes */}
+        <div className="mb-6">
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <StickyNote size={11} />
+            My Notes
+          </h2>
+          <InlineEdit
+            value={ref.notes || ''}
+            onSave={v => update('notes', v || null)}
+            multiline
+            className="text-sm text-gray-700 leading-relaxed bg-yellow-50 border border-yellow-100 rounded-xl p-3 min-h-[60px]"
+          />
+          {!ref.notes && <p className="text-xs text-gray-400 mt-1">Click to add personal notes about this reference</p>}
+        </div>
 
         {/* Full text (collapsible) */}
         {ref.full_text && (

@@ -24,6 +24,9 @@ class ReferenceUpdate(BaseModel):
     url: Optional[str] = None
     collection_id: Optional[int] = None
     tags: Optional[list[str]] = None
+    is_starred: Optional[bool] = None
+    read_status: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class ReferenceTagOut(BaseModel):
@@ -42,6 +45,9 @@ class ReferenceOut(BaseModel):
     url: Optional[str]
     file_name: Optional[str]
     collection_id: Optional[int]
+    is_starred: bool = False
+    read_status: str = "unread"
+    notes: Optional[str] = None
     created_by: int
     created_at: datetime
     updated_at: datetime
