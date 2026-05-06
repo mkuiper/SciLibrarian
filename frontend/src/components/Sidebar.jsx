@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { collectionsApi, projectsApi } from '../api/client'
 import { useAuth } from '../store/auth'
+import toast from 'react-hot-toast'
 import CollectionTree from './CollectionTree'
 import {
   BookOpen, LayoutDashboard, Inbox, Radio,
   Plus, ChevronDown, ChevronRight, LogOut, FolderPlus,
-  Sparkles, Eye, LayoutGrid, SlidersHorizontal, FolderTree,
+  Sparkles, Eye, LayoutGrid, SlidersHorizontal, FolderTree, Trash2,
 } from 'lucide-react'
 
 const navItem = 'flex items-center gap-2.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors'
@@ -17,7 +18,26 @@ const inactiveClass = 'text-slate-300 hover:bg-slate-700 hover:text-white'
 export default function Sidebar() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [collectionsOpen, setCollectionsOpen] = useState(true)
+  const [deletingProject, setDeletingProject] = useState(false)
+
+  const deleteProject = async (project) => {
+    if (!confirm(`Delete project "${project.name}"?\n\nThis will permanently delete all its collections, references, monitors, and digests. This cannot be undone.`)) return
+    setDeletingProject(true)
+    try {
+      await projectsApi.delete(project.id)
+      localStorage.removeItem('active_project_id')
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['collections-tree'] })
+      toast.success(`Project "${project.name}" deleted`)
+      navigate('/')
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete project')
+    } finally {
+      setDeletingProject(false)
+    }
+  }
 
   // Projects must be loaded before currentProject and currentProjectId are computed
   const { data: projects = [] } = useQuery({
@@ -60,19 +80,31 @@ export default function Sidebar() {
       {projects.length > 0 && (
         <div className="px-4 py-3 border-b border-slate-700">
           <p className="text-slate-500 text-xs uppercase tracking-wider mb-1">Project</p>
-          {projects.length === 1 ? (
-            <p className="text-slate-200 text-sm font-medium truncate">{projects[0].name}</p>
-          ) : (
-            <select
-              value={currentProject?.id || ''}
-              onChange={e => switchProject(parseInt(e.target.value))}
-              className="w-full bg-slate-800 text-slate-200 text-xs border border-slate-600 rounded-lg px-2 py-1.5 focus:outline-none focus:border-alexandria-500"
-            >
-              {projects.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          )}
+          <div className="flex items-center gap-1">
+            {projects.length === 1 ? (
+              <p className="text-slate-200 text-sm font-medium truncate flex-1">{projects[0].name}</p>
+            ) : (
+              <select
+                value={currentProject?.id || ''}
+                onChange={e => switchProject(parseInt(e.target.value))}
+                className="flex-1 bg-slate-800 text-slate-200 text-xs border border-slate-600 rounded-lg px-2 py-1.5 focus:outline-none focus:border-alexandria-500"
+              >
+                {projects.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            )}
+            {currentProject && (
+              <button
+                onClick={() => deleteProject(currentProject)}
+                disabled={deletingProject}
+                className="text-slate-600 hover:text-red-400 transition-colors flex-shrink-0 p-1"
+                title="Delete this project"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
+          </div>
         </div>
       )}
 

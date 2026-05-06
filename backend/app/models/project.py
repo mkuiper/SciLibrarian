@@ -20,10 +20,10 @@ class Project(Base):
     created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    collections: Mapped[list["Collection"]] = relationship(back_populates="project")
-    references: Mapped[list["Reference"]] = relationship(back_populates="project")
-    digests: Mapped[list["Digest"]] = relationship(back_populates="project")
-    watch_requests: Mapped[list["WatchRequest"]] = relationship(back_populates="project")
+    collections:    Mapped[list["Collection"]]   = relationship(back_populates="project", cascade="all, delete-orphan")
+    references:     Mapped[list["Reference"]]    = relationship(back_populates="project", cascade="all, delete-orphan")
+    digests:        Mapped[list["Digest"]]       = relationship(back_populates="project", cascade="all, delete-orphan")
+    watch_requests: Mapped[list["WatchRequest"]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
 
 class Digest(Base):

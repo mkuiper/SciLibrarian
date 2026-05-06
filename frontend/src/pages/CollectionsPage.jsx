@@ -136,8 +136,9 @@ function AddCollectionForm({ parentId, parentName, projectId, onDone }) {
       queryClient.invalidateQueries({ queryKey: ['collections-flat'] })
       toast.success('Collection created')
       onDone()
-    } catch {
-      toast.error('Failed to create collection')
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || 'Failed to create collection'
+      toast.error(msg)
     } finally {
       setLoading(false)
     }
@@ -185,7 +186,7 @@ export default function CollectionsPage() {
   const { data: tree = [], isLoading } = useQuery({
     queryKey: ['collections-tree', projectId],
     queryFn: () => collectionsApi.tree(projectId).then(r => r.data),
-    enabled: !!projectId,
+    // Don't gate on projectId — show all collections if no project selected
   })
 
   const invalidate = () => {

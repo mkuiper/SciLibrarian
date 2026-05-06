@@ -94,6 +94,23 @@ A running record of architectural choices and the reasoning behind them. Intende
 
 ---
 
+## Library organisation for research teams
+
+**Decision:** Project → Collections (hierarchical folders) → References. One library per project.
+
+**Rationale:** Research teams often run parallel workstreams. A "project" scopes everything — the library, monitors, digests, and Alexandria's configuration — so teams can maintain truly separate reference sets without cross-contamination. Within a project, collections provide a folder hierarchy that Alexandria designs on creation and can suggest reorganising as the library grows.
+
+**Key insight:** Collections are the primary navigation. The sidebar collection tree drives what's shown in the Library view. "Library" (flat search) and "Collections" (tree management) are two views of the same data, not separate concepts.
+
+**What researchers actually need beyond basic organisation:**
+- Tags as a second axis (orthogonal to folders) — a paper can be in "Technical AI Safety" AND tagged "interpretability, sparse-autoencoder"
+- Read/starred status — track what you've actually read vs filed
+- Notes/annotations — personal context on why a paper matters
+- Bulk operations — move batches of references between collections
+- Export — BibTeX, Zotero RDF, or plain citation list
+
+These are all planned for future cycles.
+
 ## Authentication: JWT, no refresh tokens yet
 
 **Decision:** Simple JWT with 24-hour expiry. No refresh token flow in Cycle 1.

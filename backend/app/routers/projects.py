@@ -101,6 +101,36 @@ async def list_projects(db: DB, current_user: CurrentUser):
     return result.scalars().all()
 
 
+@router.delete("/{project_id}", status_code=204)
+async def delete_project(project_id: int, db: DB, current_user: CurrentUser):
+    """Delete a project and all its collections, references, digests, monitors and watch requests."""
+    from app.models.reference import Reference, ReferenceTag
+    from app.models.collection import Collection
+    from app.models.review_queue import ReviewQueueItem
+    from sqlalchemy import delete as sql_delete
+
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Delete in dependency order
+    # 1. Reference tags for refs in this project
+    refs_result = await db.execute(select(Reference.id).where(Reference.project_id == project_id))
+    ref_ids = [r[0] for r in refs_result]
+    if ref_ids:
+        await db.execute(sql_delete(ReferenceTag).where(ReferenceTag.reference_id.in_(ref_ids)))
+
+    # 2. References
+    await db.execute(sql_delete(Reference).where(Reference.project_id == project_id))
+
+    # 3. Collections
+    await db.execute(sql_delete(Collection).where(Collection.project_id == project_id))
+
+    # 4. Project itself (cascades digests, watch requests via FK)
+    await db.delete(project)
+
+
 @router.get("/{project_id}", response_model=ProjectOut)
 async def get_project(project_id: int, db: DB, current_user: CurrentUser):
     result = await db.execute(select(Project).where(Project.id == project_id))

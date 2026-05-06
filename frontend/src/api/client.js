@@ -33,6 +33,7 @@ export const projectsApi = {
   get: (id) => api.get(`/projects/${id}`),
   create: (data) => api.post('/projects', data),
   update: (id, data) => api.patch(`/projects/${id}`, data),
+  delete: (id) => api.delete(`/projects/${id}`),
   updateSettings: (id, data) => api.patch(`/projects/${id}/settings`, data),
   restructureSuggestions: (id) => api.post(`/projects/${id}/restructure-suggestions`),
   listDigests: (id) => api.get(`/projects/${id}/digests`),
