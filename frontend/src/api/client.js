@@ -82,7 +82,7 @@ export const searchApi = {
 
 export const reviewApi = {
   getQueue: (params) => api.get('/review/queue', { params }),
-  decide: (id, data) => api.post(`/review/queue/${id}/decide`, data),
+  decide: (id, data) => api.post(`/review/queue/${id}/decide`, data, { timeout: 120000 }),
   listMonitors: () => api.get('/review/monitors'),
   createMonitor: (data) => api.post('/review/monitors', data),
   updateMonitor: (id, data) => api.patch(`/review/monitors/${id}`, data),

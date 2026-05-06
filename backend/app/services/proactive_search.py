@@ -1,6 +1,12 @@
 """
 Proactive search sources for Alexandria's monitors.
 
+Each monitor run:
+  1. Searches across all configured sources
+  2. Alexandria filters results for relevance to the monitor's intent
+  3. Deduplicates against the library and existing queue
+  4. Adds only relevant, new items to the review queue
+
 Free sources (no API key required):
   - arXiv: Preprints in physics, CS, maths, etc. Great for AI/ML papers.
   - Semantic Scholar: 200M+ academic papers. Free, rate-limited without key.
@@ -11,6 +17,8 @@ Optional (require API keys in .env):
   - SEMANTIC_SCHOLAR_API_KEY: increases rate limit to 100 req/sec
   - OPENALEX_EMAIL: increases rate limit (polite pool), add to .env
 """
+import json
+import logging
 import httpx
 from datetime import datetime, timezone
 from sqlalchemy import select
@@ -19,6 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.search_monitor import SearchMonitor
 from app.models.review_queue import ReviewQueueItem
+
+logger = logging.getLogger(__name__)
 
 
 async def search_arxiv(query: str, max_results: int = 10) -> list[dict]:
@@ -192,6 +202,94 @@ SOURCES = {
 }
 
 
+async def expand_query(monitor_name: str, query: str, model: str | None = None) -> list[str]:
+    """
+    Ask Alexandria to generate 3-5 effective search query variants from the
+    monitor description. Returns the original query plus variants.
+    Better coverage than a single keyword string.
+    """
+    from app.services.llm import complete_text
+    model = model or settings.default_librarian_model
+    prompt = f"""Generate 3-5 effective search queries for finding academic papers and documents related to:
+
+Monitor: {monitor_name}
+Core query: {query}
+
+Return a JSON array of search query strings only. Each should be:
+- Specific enough to return relevant results
+- Varied to improve coverage (different phrasings, synonyms, related concepts)
+- Suitable for searching arXiv and academic databases
+
+Example format: ["query 1", "query 2", "query 3"]
+Return the JSON array only, no other text."""
+
+    try:
+        raw = await complete_text(model, prompt, max_tokens=300)
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1].strip()
+            if raw.startswith("json"):
+                raw = raw[4:].strip()
+        variants = json.loads(raw)
+        if isinstance(variants, list) and all(isinstance(q, str) for q in variants):
+            # Always include the original query
+            all_queries = [query] + [v for v in variants if v != query]
+            return all_queries[:5]
+    except Exception as e:
+        logger.debug(f"Query expansion failed: {e}")
+    return [query]
+
+
+async def filter_by_relevance(
+    results: list[dict], monitor_name: str, query: str, model: str | None = None
+) -> list[dict]:
+    """
+    Ask Alexandria to evaluate each result for relevance to the monitor's intent.
+    Returns only the results she considers relevant, with a minimum quality bar.
+    """
+    if not results:
+        return []
+    if len(results) <= 3:
+        return results  # Too few to bother filtering
+
+    from app.services.llm import complete_text
+    model = model or settings.default_librarian_model
+
+    # Build a concise summary of each result for the prompt
+    items = []
+    for i, r in enumerate(results):
+        abstract = (r.get("abstract") or "")[:200]
+        items.append(f'{i}: "{r.get("title", "")}" — {abstract}')
+
+    prompt = f"""You are a research librarian. Evaluate these search results for relevance.
+
+Monitor topic: {monitor_name}
+Search intent: {query}
+
+Results:
+{chr(10).join(items)}
+
+Return a JSON array of indices (integers) for results that are GENUINELY relevant to the monitor topic.
+Be strict — exclude tangentially related, off-topic, or low-quality results.
+Return only the JSON array, e.g. [0, 2, 5]. Empty array if none are relevant."""
+
+    try:
+        raw = await complete_text(model, prompt, max_tokens=200)
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1].strip()
+            if raw.startswith("json"):
+                raw = raw[4:].strip()
+        indices = json.loads(raw)
+        if isinstance(indices, list):
+            valid = [results[i] for i in indices if isinstance(i, int) and 0 <= i < len(results)]
+            logger.info(f"Relevance filter: {len(results)} → {len(valid)} results kept")
+            return valid
+    except Exception as e:
+        logger.debug(f"Relevance filtering failed: {e}, returning all results")
+    return results
+
+
 async def _is_duplicate(db: AsyncSession, title: str, url: str | None) -> bool:
     """
     Check if this item is already in the library or the pending queue.
@@ -230,21 +328,42 @@ async def _is_duplicate(db: AsyncSession, title: str, url: str | None) -> bool:
     return False
 
 
-async def run_monitor(db: AsyncSession, monitor: SearchMonitor) -> int:
-    all_results = []
+async def run_monitor(db: AsyncSession, monitor: SearchMonitor, model: str | None = None) -> int:
     sources = [s.strip() for s in monitor.sources.split(",")]
+    model = model or settings.default_librarian_model
 
-    for source_name in sources:
-        fn = SOURCES.get(source_name)
-        if fn:
-            try:
-                all_results.extend(await fn(monitor.query))
-            except Exception:
-                pass
+    # Step 1: Expand the query into variants for better coverage
+    queries = await expand_query(monitor.name, monitor.query, model)
+    logger.info(f"Monitor '{monitor.name}': running {len(queries)} query variants across {sources}")
 
+    # Step 2: Search all sources with all query variants
+    seen_titles: set[str] = set()
+    all_results: list[dict] = []
+    for query in queries:
+        for source_name in sources:
+            fn = SOURCES.get(source_name)
+            if fn:
+                try:
+                    for result in await fn(query):
+                        title_key = result.get("title", "").strip().lower()
+                        if title_key and title_key not in seen_titles:
+                            seen_titles.add(title_key)
+                            all_results.append(result)
+                except Exception as e:
+                    logger.debug(f"Source {source_name} failed for query '{query}': {e}")
+
+    if not all_results:
+        monitor.last_run = datetime.now(timezone.utc)
+        await db.commit()
+        return 0
+
+    # Step 3: Alexandria filters for genuine relevance
+    relevant = await filter_by_relevance(all_results, monitor.name, monitor.query, model)
+
+    # Step 4: Deduplicate against library + existing queue, then add
     added = 0
     skipped_duplicates = 0
-    for item in all_results:
+    for item in relevant:
         if not item.get("title"):
             continue
         if await _is_duplicate(db, item["title"], item.get("url")):
@@ -266,6 +385,7 @@ async def run_monitor(db: AsyncSession, monitor: SearchMonitor) -> int:
 
     monitor.last_run = datetime.now(timezone.utc)
     await db.commit()
+    logger.info(f"Monitor '{monitor.name}': {len(all_results)} found → {len(relevant)} relevant → {added} added to queue ({skipped_duplicates} duplicates skipped)")
     return added
 
 
