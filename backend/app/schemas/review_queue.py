@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 class ReviewQueueItemOut(BaseModel):
     id: int
+    project_id: Optional[int] = None
     title: str
     url: Optional[str]
     source: str

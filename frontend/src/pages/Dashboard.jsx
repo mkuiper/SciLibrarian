@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { projectsApi, referencesApi, reviewApi } from '../api/client'
 import { useAuth } from '../store/auth'
+import { useProject } from '../hooks/useProject'
 import { BookOpen, Inbox, Sparkles, Plus, ArrowRight, Radio } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -20,34 +21,28 @@ function StatCard({ icon: Icon, label, value, color, onClick }) {
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-
-  const { data: projects = [] } = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => projectsApi.list().then(r => r.data),
-  })
-
-  const currentProject = projects[0]
+  const { project: currentProject, projectId } = useProject()
 
   const { data: stats } = useQuery({
-    queryKey: ['ref-stats', currentProject?.id],
-    queryFn: () => referencesApi.stats(currentProject ? { project_id: currentProject.id } : {}).then(r => r.data),
-    enabled: !!currentProject,
+    queryKey: ['ref-stats', projectId],
+    queryFn: () => referencesApi.stats(projectId ? { project_id: projectId } : {}).then(r => r.data),
+    enabled: !!projectId,
   })
 
   const { data: recentRefs = [] } = useQuery({
-    queryKey: ['references', 'recent', currentProject?.id],
-    queryFn: () => referencesApi.list({ project_id: currentProject?.id, limit: 5 }).then(r => r.data),
-    enabled: !!currentProject,
+    queryKey: ['references', 'recent', projectId],
+    queryFn: () => referencesApi.list({ project_id: projectId, limit: 5 }).then(r => r.data),
+    enabled: !!projectId,
   })
 
   const { data: queueItems = [] } = useQuery({
-    queryKey: ['review-queue', 'pending'],
-    queryFn: () => reviewApi.getQueue({ status: 'pending', limit: 5 }).then(r => r.data),
+    queryKey: ['review-queue', 'pending', projectId],
+    queryFn: () => reviewApi.getQueue({ status: 'pending', project_id: projectId, limit: 5 }).then(r => r.data),
   })
 
   const { data: monitors = [] } = useQuery({
-    queryKey: ['monitors'],
-    queryFn: () => reviewApi.listMonitors().then(r => r.data),
+    queryKey: ['monitors', projectId],
+    queryFn: () => reviewApi.listMonitors(projectId ? { project_id: projectId } : {}).then(r => r.data),
   })
 
   const structure = currentProject?.initial_structure

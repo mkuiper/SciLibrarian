@@ -10,6 +10,7 @@ class ReviewQueueItem(Base):
     __tablename__ = "review_queue"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("projects.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(500))
     url: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)
     source: Mapped[str] = mapped_column(String(100))

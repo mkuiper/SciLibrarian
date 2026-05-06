@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { reviewApi } from '../api/client'
+import { useProject } from '../hooks/useProject'
 import { Plus, Play, Pause, Trash2, Loader2, Radio } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
 
 const FREQUENCIES = ['daily', 'weekly']
 
-function MonitorForm({ onClose }) {
+function MonitorForm({ onClose, projectId }) {
   const [form, setForm] = useState({
     name: '',
     query: '',
@@ -21,7 +22,7 @@ function MonitorForm({ onClose }) {
     e.preventDefault()
     setLoading(true)
     try {
-      await reviewApi.createMonitor(form)
+      await reviewApi.createMonitor({ ...form, project_id: projectId || undefined })
       queryClient.invalidateQueries({ queryKey: ['monitors'] })
       toast.success('Monitor created')
       onClose()
@@ -158,10 +159,11 @@ function MonitorCard({ monitor }) {
 
 export default function Monitors() {
   const [showForm, setShowForm] = useState(false)
+  const { projectId } = useProject()
 
   const { data: monitors = [], isLoading } = useQuery({
-    queryKey: ['monitors'],
-    queryFn: () => reviewApi.listMonitors().then(r => r.data),
+    queryKey: ['monitors', projectId],
+    queryFn: () => reviewApi.listMonitors(projectId ? { project_id: projectId } : {}).then(r => r.data),
   })
 
   return (
@@ -179,7 +181,7 @@ export default function Monitors() {
         </button>
       </div>
 
-      {showForm && <MonitorForm onClose={() => setShowForm(false)} />}
+      {showForm && <MonitorForm onClose={() => setShowForm(false)} projectId={projectId} />}
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">

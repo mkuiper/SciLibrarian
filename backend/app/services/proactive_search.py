@@ -375,6 +375,7 @@ async def run_monitor(db: AsyncSession, monitor: SearchMonitor, model: str | Non
             source=item["source"],
             search_query=monitor.query,
             monitor_id=monitor.id,
+            project_id=monitor.project_id,
             abstract=item.get("abstract"),
             authors=item.get("authors"),
             year=item.get("year"),

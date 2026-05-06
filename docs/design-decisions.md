@@ -111,6 +111,28 @@ A running record of architectural choices and the reasoning behind them. Intende
 
 These are all planned for future cycles.
 
+## Two-agent development: build + review cycles
+
+**Decision:** Use a second AI coding agent to review and improve work from the first agent, with written handoff notes between passes.
+
+**Rationale:** The reviewing agent starts cold, with no attachment to prior decisions. This surfaces blind spots the original author normalised. In practice it has caught: a concurrent SQLAlchemy session hazard that "worked" in testing, a `project_id` that the frontend sent but the backend silently dropped, a stale variable name in bulk upload (`len(pdf_files)` after the variable was renamed), and a wrong model-picker default in the add-reference modal.
+
+**Advantages:**
+- Cold start = no confirmation bias. The reviewer has no reason to defend prior choices.
+- Specialisation: builder optimises for velocity, reviewer optimises for correctness and security.
+- Handoff artifacts (`codex_agent_notes.txt`, `claude_agent_notes.txt`) become permanent project documentation.
+- Knowing a second agent will read the code discourages shortcuts.
+
+**Disadvantages:**
+- Context loss at handoff. The reviewer doesn't know *why* a decision was made, only what it looks like. Can produce over-eager suggestions that break unstated invariants.
+- Shared training data means agents may share the same blind spots — not truly independent review.
+- Neither agent can run the actual system and do a real smoke test without a working Docker environment.
+- The handoff notes need to be kept current or quality degrades over passes.
+
+**Practice so far:** ~7 real defects caught in the first review pass. Worth continuing.
+
+---
+
 ## Authentication: JWT, no refresh tokens yet
 
 **Decision:** Simple JWT with 24-hour expiry. No refresh token flow in Cycle 1.

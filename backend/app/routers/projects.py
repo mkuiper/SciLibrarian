@@ -241,6 +241,7 @@ async def create_watch_request(project_id: int, data: WatchRequestCreate, db: DB
     keywords = data.keywords or data.description[:100]
     monitor = SearchMonitor(
         user_id=current_user.id,
+        project_id=project_id,
         name=f"Watch: {data.description[:60]}",
         query=keywords,
         sources="arxiv,semantic_scholar,openalex,web",

@@ -8,6 +8,7 @@ class SearchMonitorCreate(BaseModel):
     query: str
     sources: str = "arxiv,semantic_scholar"
     frequency: str = "weekly"
+    project_id: Optional[int] = None
 
 
 class SearchMonitorUpdate(BaseModel):
@@ -21,6 +22,7 @@ class SearchMonitorUpdate(BaseModel):
 class SearchMonitorOut(BaseModel):
     id: int
     user_id: int
+    project_id: Optional[int]
     name: str
     query: str
     sources: str

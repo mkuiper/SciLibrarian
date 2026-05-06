@@ -36,6 +36,8 @@ _MIGRATIONS = [
     'ALTER TABLE "references" ADD COLUMN IF NOT EXISTS read_status VARCHAR(20) NOT NULL DEFAULT \'unread\'',
     'ALTER TABLE "references" ADD COLUMN IF NOT EXISTS notes TEXT',
     'ALTER TABLE review_queue ADD COLUMN IF NOT EXISTS collection_id INTEGER REFERENCES collections(id)',
+    'ALTER TABLE search_monitors ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id)',
+    'ALTER TABLE review_queue ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id)',
 ]
 
 

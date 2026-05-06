@@ -11,6 +11,7 @@ class SearchMonitor(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    project_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("projects.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(255))
     query: Mapped[str] = mapped_column(Text)
     sources: Mapped[str] = mapped_column(String(500), default="arxiv,semantic_scholar")

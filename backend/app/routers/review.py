@@ -31,6 +31,7 @@ async def get_queue(
     db: DB,
     current_user: CurrentUser,
     status: str = Query("pending"),
+    project_id: Optional[int] = Query(None),
     limit: int = Query(100),
     offset: int = Query(0),
 ):
@@ -41,6 +42,8 @@ async def get_queue(
         .offset(offset)
         .limit(limit)
     )
+    if project_id is not None:
+        stmt = stmt.where(ReviewQueueItem.project_id == project_id)
     result = await db.execute(stmt)
     return result.scalars().all()
 
@@ -54,7 +57,7 @@ async def decide(item_id: int, decision: ReviewDecision, db: DB, current_user: C
 
     if decision.action == "approve":
         model = decision.model or settings.default_ingestion_model
-        ref = await _approve_item(db, item, decision.collection_id, current_user.id, model, decision.full_ingest)
+        ref = await _approve_item(db, item, decision.collection_id, item.project_id, current_user.id, model, decision.full_ingest)
         db.add(ref)
         item.status = "approved"
     elif decision.action == "reject":
@@ -70,7 +73,7 @@ async def decide(item_id: int, decision: ReviewDecision, db: DB, current_user: C
 
 
 async def _approve_item(
-    db, item: ReviewQueueItem, collection_id: Optional[int],
+    db, item: ReviewQueueItem, collection_id: Optional[int], project_id: Optional[int],
     user_id: int, model: str, full_ingest: bool
 ) -> Reference:
     """
@@ -93,6 +96,7 @@ async def _approve_item(
                 url=item.url,
                 full_text=meta.get("full_text"),
                 collection_id=collection_id,
+                project_id=project_id,
                 created_by=user_id,
                 extra_metadata=meta.get("extra_metadata"),
             )
@@ -114,6 +118,7 @@ async def _approve_item(
         abstract=item.abstract,
         url=item.url,
         collection_id=collection_id,
+        project_id=project_id,
         created_by=user_id,
         extra_metadata=item.extra_metadata,
     )
@@ -122,8 +127,11 @@ async def _approve_item(
 # ── Monitors ──────────────────────────────────────────────────────────────────
 
 @router.get("/monitors", response_model=list[SearchMonitorOut])
-async def list_monitors(db: DB, current_user: CurrentUser):
-    result = await db.execute(select(SearchMonitor).where(SearchMonitor.user_id == current_user.id))
+async def list_monitors(db: DB, current_user: CurrentUser, project_id: Optional[int] = Query(None)):
+    stmt = select(SearchMonitor).where(SearchMonitor.user_id == current_user.id)
+    if project_id is not None:
+        stmt = stmt.where(SearchMonitor.project_id == project_id)
+    result = await db.execute(stmt)
     return result.scalars().all()
 
 

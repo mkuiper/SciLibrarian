@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { reviewApi, collectionsApi } from '../api/client'
+import { useProject } from '../hooks/useProject'
 import { Check, X, ExternalLink, Loader2, CheckCheck, XCircle, Inbox, Sparkles, Zap } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
@@ -94,15 +95,16 @@ export default function ReviewQueue() {
   const [bulkLoading, setBulkLoading] = useState(false)
   const [fullIngest, setFullIngest] = useState(true)
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
 
   const { data: items = [], isLoading } = useQuery({
-    queryKey: ['review-queue', status],
-    queryFn: () => reviewApi.getQueue({ status, limit: 100 }).then(r => r.data),
+    queryKey: ['review-queue', status, projectId],
+    queryFn: () => reviewApi.getQueue({ status, project_id: projectId, limit: 100 }).then(r => r.data),
   })
 
   const { data: flatCollections = [] } = useQuery({
-    queryKey: ['collections-flat'],
-    queryFn: () => collectionsApi.list().then(r => r.data),
+    queryKey: ['collections-flat', projectId],
+    queryFn: () => collectionsApi.list(projectId).then(r => r.data),
   })
 
   const handleDecide = async (itemId, action, collectionId = null, doFullIngest = true) => {
