@@ -191,6 +191,8 @@ async def create_digest(project_id: int, data: DigestCreate, db: DB, current_use
         period_end=data.period_end,
         model=data.model,
         collection_id=data.collection_id,
+        tag=data.tag or None,
+        digest_type=data.digest_type,
     )
 
     if data.send_email:
@@ -223,6 +225,17 @@ async def get_digest(project_id: int, digest_id: int, db: DB, current_user: Curr
     if not digest:
         raise HTTPException(status_code=404, detail="Digest not found")
     return digest
+
+
+@router.delete("/{project_id}/digests/{digest_id}", status_code=204)
+async def delete_digest(project_id: int, digest_id: int, db: DB, current_user: CurrentUser):
+    result = await db.execute(
+        select(Digest).where(Digest.project_id == project_id, Digest.id == digest_id)
+    )
+    digest = result.scalar_one_or_none()
+    if not digest:
+        raise HTTPException(status_code=404, detail="Digest not found")
+    await db.delete(digest)
 
 
 @router.post("/{project_id}/watch-requests", response_model=WatchRequestOut, status_code=201)

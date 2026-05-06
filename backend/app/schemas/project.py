@@ -51,6 +51,8 @@ class DigestCreate(BaseModel):
     period_end: datetime
     model: str = "claude-sonnet-4-6"
     collection_id: Optional[int] = None
+    tag: Optional[str] = None
+    digest_type: str = "state_of_art"  # state_of_art | reading_list | whats_new
     send_email: bool = False
 
 
