@@ -111,6 +111,20 @@ Keep the next increment focused on project-aware researcher workflows:
   - add a small migration for those columns in database.py;
   - then do one Docker-based smoke test from monitor discovery to approval.
 
+Follow-up on feature planning
+-----------------------------
+2026-05-07: Added docs/feature-requests.md after discussing whether the
+platform would be useful to researchers. Short answer: yes, if development
+prioritizes trust, synthesis and evidence trails over raw ingestion volume.
+
+The feature request file captures staged ideas including Research Radar, better
+ranked search, citation/related-work graph, claim extraction, richer reading
+workflow, living literature reviews, monitor learning from review decisions,
+evidence trails, deduplication and team workflow. Treat these as a roadmap to
+sequence, not as a single implementation batch. I still think the next concrete
+engineering increment should be project-aware monitors/review queue, because it
+is foundational for several of those product ideas.
+
 ================================================================================
   END NOTES
 ================================================================================
