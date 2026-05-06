@@ -6,7 +6,7 @@ from pydantic import BaseModel
 class SearchMonitorCreate(BaseModel):
     name: str
     query: str
-    sources: str = "arxiv,semantic_scholar"
+    sources: str = "arxiv,semantic_scholar,openalex,web,huggingface"
     frequency: str = "weekly"
     project_id: Optional[int] = None
 

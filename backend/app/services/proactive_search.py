@@ -12,6 +12,8 @@ Free sources (no API key required):
   - Semantic Scholar: 200M+ academic papers. Free, rate-limited without key.
   - OpenAlex: 250M+ open scholarly works. Free, generous rate limit with email.
   - DuckDuckGo: General web search — good for government docs, news, policy.
+  - Hugging Face: Model hub — model cards, datasets, spaces. Best source for
+    AI model cards (Claude, GPT, Gemini, Llama, etc.).
 
 Optional (require API keys in .env):
   - SEMANTIC_SCHOLAR_API_KEY: increases rate limit to 100 req/sec
@@ -190,8 +192,44 @@ async def search_web(query: str, max_results: int = 10) -> list[dict]:
                     "source": "web",
                 })
         return results
-    except Exception:
+    except Exception as e:
+        logger.debug(f"DuckDuckGo search failed: {e}")
         return []
+
+
+async def search_huggingface(query: str, max_results: int = 10) -> list[dict]:
+    """
+    Hugging Face model hub search — returns model cards, datasets and spaces.
+    Free REST API, no key required. Best source for AI model cards.
+    """
+    results = []
+
+    # Search models
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                "https://huggingface.co/api/models",
+                params={"search": query, "limit": max_results, "full": "true"},
+                headers={"User-Agent": "SciLibrarian/1.0"},
+            )
+        if resp.status_code == 200:
+            for m in resp.json():
+                model_id = m.get("modelId") or m.get("id", "")
+                description = (m.get("cardData") or {}).get("description") or ""
+                tags = m.get("tags") or []
+                abstract = description or (", ".join(tags[:10]) if tags else "")
+                results.append({
+                    "title": f"Model card: {model_id}",
+                    "abstract": abstract,
+                    "authors": m.get("author") or m.get("authorData", {}).get("fullname"),
+                    "year": None,
+                    "url": f"https://huggingface.co/{model_id}",
+                    "source": "huggingface",
+                })
+    except Exception as e:
+        logger.debug(f"Hugging Face model search failed: {e}")
+
+    return results
 
 
 SOURCES = {
@@ -199,26 +237,26 @@ SOURCES = {
     "semantic_scholar": search_semantic_scholar,
     "openalex": search_openalex,
     "web": search_web,
+    "huggingface": search_huggingface,
 }
 
 
 async def expand_query(monitor_name: str, query: str, model: str | None = None) -> list[str]:
     """
-    Ask Alexandria to generate 3-5 effective search query variants from the
-    monitor description. Returns the original query plus variants.
-    Better coverage than a single keyword string.
+    Ask Alexandria to generate 3-5 effective search query variants.
+    Returns the original query plus variants for broader coverage.
     """
     from app.services.llm import complete_text
     model = model or settings.default_librarian_model
-    prompt = f"""Generate 3-5 effective search queries for finding academic papers and documents related to:
+    prompt = f"""Generate 3-5 effective search queries for finding papers, reports, model cards, technical documents, and web pages related to:
 
 Monitor: {monitor_name}
 Core query: {query}
 
 Return a JSON array of search query strings only. Each should be:
 - Specific enough to return relevant results
-- Varied to improve coverage (different phrasings, synonyms, related concepts)
-- Suitable for searching arXiv and academic databases
+- Varied (different phrasings, synonyms, related concepts, author names if relevant)
+- Suitable for both academic databases and general web search
 
 Example format: ["query 1", "query 2", "query 3"]
 Return the JSON array only, no other text."""
@@ -232,8 +270,8 @@ Return the JSON array only, no other text."""
                 raw = raw[4:].strip()
         variants = json.loads(raw)
         if isinstance(variants, list) and all(isinstance(q, str) for q in variants):
-            # Always include the original query
             all_queries = [query] + [v for v in variants if v != query]
+            logger.info(f"Query expansion: '{query}' → {all_queries[:5]}")
             return all_queries[:5]
     except Exception as e:
         logger.debug(f"Query expansion failed: {e}")
@@ -245,33 +283,36 @@ async def filter_by_relevance(
 ) -> list[dict]:
     """
     Ask Alexandria to evaluate each result for relevance to the monitor's intent.
-    Returns only the results she considers relevant, with a minimum quality bar.
+    Returns only the results she considers relevant.
+    Falls back to returning all results if the model produces an unusable response.
     """
     if not results:
         return []
     if len(results) <= 3:
-        return results  # Too few to bother filtering
+        return results
 
     from app.services.llm import complete_text
     model = model or settings.default_librarian_model
 
-    # Build a concise summary of each result for the prompt
     items = []
     for i, r in enumerate(results):
+        source = r.get("source", "")
         abstract = (r.get("abstract") or "")[:200]
-        items.append(f'{i}: "{r.get("title", "")}" — {abstract}')
+        items.append(f'{i} [{source}]: "{r.get("title", "")}" — {abstract}')
 
-    prompt = f"""You are a research librarian. Evaluate these search results for relevance.
+    prompt = f"""You are a research librarian evaluating search results.
 
 Monitor topic: {monitor_name}
 Search intent: {query}
 
-Results:
+Results (index [source]: title — description):
 {chr(10).join(items)}
 
-Return a JSON array of indices (integers) for results that are GENUINELY relevant to the monitor topic.
-Be strict — exclude tangentially related, off-topic, or low-quality results.
-Return only the JSON array, e.g. [0, 2, 5]. Empty array if none are relevant."""
+Return a JSON array of index numbers for results that are relevant to the monitor topic.
+Include results that directly match OR are closely related to the topic.
+Model cards, technical reports, blog posts, and web pages count as valid — not just academic papers.
+Exclude only clearly off-topic or spam results.
+Return the JSON array only, e.g. [0, 2, 5]. Return all indices if most results are relevant."""
 
     try:
         raw = await complete_text(model, prompt, max_tokens=200)
@@ -281,12 +322,17 @@ Return only the JSON array, e.g. [0, 2, 5]. Empty array if none are relevant."""
             if raw.startswith("json"):
                 raw = raw[4:].strip()
         indices = json.loads(raw)
-        if isinstance(indices, list):
+        if isinstance(indices, list) and len(indices) > 0:
             valid = [results[i] for i in indices if isinstance(i, int) and 0 <= i < len(results)]
-            logger.info(f"Relevance filter: {len(results)} → {len(valid)} results kept")
+            logger.info(f"Relevance filter: {len(results)} → {len(valid)} results kept (indices: {indices})")
             return valid
+        elif isinstance(indices, list) and len(indices) == 0:
+            # Model explicitly returned empty — log and fall back to passing all through
+            # rather than silently dropping everything
+            logger.warning(f"Relevance filter returned empty for '{monitor_name}' — passing all {len(results)} results through")
+            return results
     except Exception as e:
-        logger.debug(f"Relevance filtering failed: {e}, returning all results")
+        logger.debug(f"Relevance filtering failed ({e}), returning all results")
     return results
 
 
@@ -342,15 +388,21 @@ async def run_monitor(db: AsyncSession, monitor: SearchMonitor, model: str | Non
     for query in queries:
         for source_name in sources:
             fn = SOURCES.get(source_name)
-            if fn:
-                try:
-                    for result in await fn(query):
-                        title_key = result.get("title", "").strip().lower()
-                        if title_key and title_key not in seen_titles:
-                            seen_titles.add(title_key)
-                            all_results.append(result)
-                except Exception as e:
-                    logger.debug(f"Source {source_name} failed for query '{query}': {e}")
+            if not fn:
+                logger.warning(f"Unknown source '{source_name}' — skipping")
+                continue
+            try:
+                source_results = await fn(query)
+                new_count = 0
+                for result in source_results:
+                    title_key = result.get("title", "").strip().lower()
+                    if title_key and title_key not in seen_titles:
+                        seen_titles.add(title_key)
+                        all_results.append(result)
+                        new_count += 1
+                logger.info(f"  {source_name} / '{query[:50]}': {len(source_results)} returned, {new_count} new")
+            except Exception as e:
+                logger.warning(f"Source {source_name} failed for query '{query}': {e}")
 
     if not all_results:
         monitor.last_run = datetime.now(timezone.utc)

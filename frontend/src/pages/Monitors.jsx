@@ -12,7 +12,7 @@ function MonitorForm({ onClose, projectId }) {
   const [form, setForm] = useState({
     name: '',
     query: '',
-    sources: 'arxiv,semantic_scholar,openalex,web',
+    sources: 'arxiv,semantic_scholar,openalex,web,huggingface',
     frequency: 'weekly',
   })
   const [loading, setLoading] = useState(false)
@@ -56,9 +56,11 @@ function MonitorForm({ onClose, projectId }) {
           <div>
             <label className="label">Sources</label>
             <select className="input" value={form.sources} onChange={e => setForm(f => ({ ...f, sources: e.target.value }))}>
-              <option value="arxiv,semantic_scholar,openalex,web">All sources (recommended)</option>
-              <option value="arxiv,openalex,web">Academic + Web</option>
+              <option value="arxiv,semantic_scholar,openalex,web,huggingface">All sources (recommended)</option>
+              <option value="arxiv,openalex,web,huggingface">Academic + Web + HuggingFace</option>
               <option value="arxiv,semantic_scholar,openalex">Academic only</option>
+              <option value="web,huggingface">Web + HuggingFace (model cards, reports)</option>
+              <option value="huggingface">HuggingFace only (model cards)</option>
               <option value="web">Web search only (policy, news, gov docs)</option>
               <option value="arxiv">arXiv only</option>
               <option value="semantic_scholar">Semantic Scholar only</option>

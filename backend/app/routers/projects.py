@@ -244,7 +244,7 @@ async def create_watch_request(project_id: int, data: WatchRequestCreate, db: DB
         project_id=project_id,
         name=f"Watch: {data.description[:60]}",
         query=keywords,
-        sources="arxiv,semantic_scholar,openalex,web",
+        sources="arxiv,semantic_scholar,openalex,web,huggingface",
         frequency="weekly",
         enabled=True,
     )
