@@ -4,16 +4,18 @@ import { useNavigate } from 'react-router-dom'
 import { referencesApi } from '../api/client'
 import { Tag, Search, X, Loader2 } from 'lucide-react'
 import ReferenceCard from '../components/ReferenceCard'
+import { useProject } from '../hooks/useProject'
 
 export default function TagBrowser() {
   const navigate = useNavigate()
+  const { projectId } = useProject()
   const [selectedTag, setSelectedTag] = useState(null)
   const [search, setSearch] = useState('')
 
   // Get all references to extract tags
   const { data: allRefs = [], isLoading } = useQuery({
-    queryKey: ['references', 'all-for-tags'],
-    queryFn: () => referencesApi.list({ limit: 200 }).then(r => r.data),
+    queryKey: ['references', 'all-for-tags', projectId],
+    queryFn: () => referencesApi.list({ project_id: projectId, limit: 200 }).then(r => r.data),
   })
 
   // Aggregate tags with counts

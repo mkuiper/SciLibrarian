@@ -45,6 +45,7 @@ class ReferenceOut(BaseModel):
     url: Optional[str]
     file_name: Optional[str]
     collection_id: Optional[int]
+    project_id: Optional[int]
     is_starred: bool = False
     read_status: str = "unread"
     notes: Optional[str] = None

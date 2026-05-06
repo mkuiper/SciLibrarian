@@ -77,8 +77,9 @@ export default function Library() {
   })
 
   const { data: refs = [], isLoading } = useQuery({
-    queryKey: ['references', colId, filterType, filterStarred, filterUnread],
+    queryKey: ['references', projectId, colId, filterType, filterStarred, filterUnread],
     queryFn: () => referencesApi.list({
+      project_id: projectId,
       collection_id: colId,
       source_type: filterType || undefined,
       limit: 200,
@@ -87,8 +88,8 @@ export default function Library() {
   })
 
   const { data: searchResults } = useQuery({
-    queryKey: ['search', searchQ, colId, filterType],
-    queryFn: () => searchApi.search({ q: searchQ, collection_id: colId, source_type: filterType || undefined }).then(r => r.data),
+    queryKey: ['search', projectId, searchQ, colId, filterType],
+    queryFn: () => searchApi.search({ q: searchQ, project_id: projectId, collection_id: colId, source_type: filterType || undefined }).then(r => r.data),
     enabled: !!searchQ && searchQ.length > 2,
   })
 

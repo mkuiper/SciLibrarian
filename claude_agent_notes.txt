@@ -1,0 +1,130 @@
+================================================================================
+  SCILIBRARIAN — CODEX REVIEW / COLLABORATION NOTES
+  Prepared by: Codex
+  Date: 2026-05-06
+  Branch: codex-review-researcher-improvements
+================================================================================
+
+Context
+-------
+I started from the previous agent's notes in codex_agent_notes.txt and made a
+small first pass rather than broad refactoring. The strongest early finding was
+that the app presents itself as project-scoped, but several reference paths were
+not carrying or filtering project_id. For researchers working across fast-moving
+topics, that makes the library noisier and risks mixing unrelated project
+material.
+
+Changes made in this pass
+-------------------------
+1. Reference ingestion now preserves project scope for single file and URL flows.
+   The frontend was already sending project_id for /references/upload and
+   /references/from-url, but the backend ignored it. Those endpoints now accept
+   project_id and persist it on Reference.
+
+2. Added a _resolve_project_id helper in backend/app/routers/references.py.
+   If a caller sends only collection_id, the backend derives project_id from the
+   collection. If both are sent, it rejects mismatches so references do not end
+   up in a collection from one project while tagged to another project.
+
+3. List, dashboard stats and full-text search can now filter by project_id.
+   Updated:
+     - GET /references
+     - GET /references/stats/summary
+     - GET /search
+     - backend/app/services/search.py
+
+4. Frontend library, dashboard recent references and tag browser now include the
+   active project_id in reference/search queries.
+
+5. AddReferenceModal now uses the selected project's ingestion_model instead of
+   always using projects[0]. That matters when different research projects use
+   different model/provider settings.
+
+6. Fixed a bulk upload bug:
+   /references/upload-bulk returned len(pdf_files), but pdf_files no longer
+   exists after the endpoint expanded beyond PDFs. It now returns len(valid_files).
+
+7. Bulk URL ingestion still fetches/summarizes URLs concurrently, but database
+   writes are now sequential in the request's single AsyncSession. The previous
+   shape performed concurrent db.add/db.flush calls against the same session,
+   which is risky with SQLAlchemy async sessions.
+
+Verification
+------------
+Passed:
+  - git diff --check
+  - Python parse check for backend/app without writing bytecode
+  - Focused Python parse check for changed backend files
+
+Could not complete:
+  - python3 -m compileall backend/app
+    Blocked by root-owned __pycache__ files under backend/app/services from the
+    Docker/container environment.
+
+  - npm run build in frontend
+    frontend/node_modules exists but is empty and root-owned. Because local Vite
+    is missing, npm appears to fall through to an unrelated system executable
+    named vite, which aborts with:
+      Cannot open file build
+      Aborted (core dumped)
+    Reinstall frontend dependencies in a writable node_modules before trusting a
+    local frontend build.
+
+Open review findings / next good increments
+-------------------------------------------
+1. Project and collection endpoints are still not user/team scoped.
+   list_projects returns all projects for any authenticated user. This may be OK
+   for a single shared internal deployment, but it is not safe multi-user
+   isolation. The app needs a deliberate model here: personal libraries,
+   shared team libraries, or project memberships.
+
+2. Direct reference endpoints still fetch by ref_id only.
+   GET/PATCH/DELETE /references/{id}, file serving and BibTeX export should
+   eventually enforce either project membership or current-user ownership.
+   I did not change this yet because the team-sharing intent is unclear.
+
+3. Review queue and monitors are only partly project-aware.
+   Watch requests auto-create monitors, but SearchMonitor has no project_id.
+   Queue items also do not carry project_id directly. This should be addressed
+   before monitors are heavily used across multiple research projects.
+
+4. Search is currently lower(...).contains(...) over several text columns.
+   For researcher use, a next practical improvement is PostgreSQL full-text
+   search with ranking, snippets and server-side pagination. Embeddings can come
+   later; basic ranked lexical search will already improve usefulness.
+
+5. Bulk approve / full ingest still happens inside HTTP requests.
+   Long-running monitor approvals should become background jobs with status or
+   progress. Researchers will otherwise see timeouts on larger review queues.
+
+6. Frontend dependency/install state should be repaired.
+   node_modules should not be committed, but the current root-owned empty
+   directory blocks normal local verification. Remove/recreate it from the right
+   user or build through Docker.
+
+Suggested next direction
+------------------------
+Keep the next increment focused on project-aware researcher workflows:
+  - add project_id to SearchMonitor and ReviewQueueItem;
+  - filter review queues by active project;
+  - ensure approving a queue item writes Reference.project_id;
+  - add a small migration for those columns in database.py;
+  - then do one Docker-based smoke test from monitor discovery to approval.
+
+Follow-up on feature planning
+-----------------------------
+2026-05-07: Added docs/feature-requests.md after discussing whether the
+platform would be useful to researchers. Short answer: yes, if development
+prioritizes trust, synthesis and evidence trails over raw ingestion volume.
+
+The feature request file captures staged ideas including Research Radar, better
+ranked search, citation/related-work graph, claim extraction, richer reading
+workflow, living literature reviews, monitor learning from review decisions,
+evidence trails, deduplication and team workflow. Treat these as a roadmap to
+sequence, not as a single implementation batch. I still think the next concrete
+engineering increment should be project-aware monitors/review queue, because it
+is foundational for several of those product ideas.
+
+================================================================================
+  END NOTES
+================================================================================

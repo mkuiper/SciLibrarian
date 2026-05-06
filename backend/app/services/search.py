@@ -10,6 +10,7 @@ async def full_text_search(
     db: AsyncSession,
     query: str,
     collection_id: Optional[int] = None,
+    project_id: Optional[int] = None,
     source_type: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
@@ -34,6 +35,9 @@ async def full_text_search(
 
     if collection_id is not None:
         stmt = stmt.where(Reference.collection_id == collection_id)
+
+    if project_id is not None:
+        stmt = stmt.where(Reference.project_id == project_id)
 
     if source_type:
         stmt = stmt.where(Reference.source_type == source_type)

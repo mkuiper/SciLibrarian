@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.dependencies import DB, CurrentUser
+from app.models.collection import Collection
 from app.models.reference import Reference, ReferenceTag
 from app.schemas.reference import ReferenceCreate, ReferenceUpdate, ReferenceOut
 from app.services import ingestion
@@ -27,10 +28,29 @@ async def _attach_tags(db: DB, ref: Reference, tags: list[str]):
             db.add(ReferenceTag(reference_id=ref.id, tag=t))
 
 
+async def _resolve_project_id(
+    db: DB,
+    collection_id: Optional[int],
+    project_id: Optional[int],
+) -> Optional[int]:
+    """Keep references project-scoped even when callers only send collection_id."""
+    if collection_id is None:
+        return project_id
+
+    result = await db.execute(select(Collection).where(Collection.id == collection_id))
+    collection = result.scalar_one_or_none()
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    if project_id is not None and collection.project_id != project_id:
+        raise HTTPException(status_code=400, detail="Collection does not belong to the selected project")
+    return collection.project_id or project_id
+
+
 @router.post("/upload", response_model=ReferenceOut, status_code=201)
 async def upload_file(
     file: UploadFile = File(...),
     collection_id: Optional[int] = Form(None),
+    project_id: Optional[int] = Form(None),
     model: str = Form("claude-sonnet-4-6"),
     db: DB = None,
     current_user: CurrentUser = None,
@@ -46,6 +66,7 @@ async def upload_file(
     if len(content) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(status_code=413, detail=f"File too large (max {settings.max_upload_mb}MB)")
 
+    project_id = await _resolve_project_id(db, collection_id, project_id)
     meta = await ingestion.ingest_file(content, file.filename, model)
 
     ref = Reference(
@@ -60,6 +81,7 @@ async def upload_file(
         file_name=meta.get("file_name"),
         full_text=meta.get("full_text"),
         collection_id=collection_id,
+        project_id=project_id,
         created_by=current_user.id,
         extra_metadata=meta.get("extra_metadata"),
     )
@@ -80,10 +102,12 @@ async def upload_file(
 async def ingest_from_url(
     url: str,
     collection_id: Optional[int] = None,
+    project_id: Optional[int] = None,
     model: str = "claude-sonnet-4-6",
     db: DB = None,
     current_user: CurrentUser = None,
 ):
+    project_id = await _resolve_project_id(db, collection_id, project_id)
     meta = await ingestion.ingest_url(url, model)
 
     ref = Reference(
@@ -96,6 +120,7 @@ async def ingest_from_url(
         url=url,
         full_text=meta.get("full_text"),
         collection_id=collection_id,
+        project_id=project_id,
         created_by=current_user.id,
         extra_metadata=meta.get("extra_metadata"),
     )
@@ -120,10 +145,10 @@ async def stats(db: DB, current_user: CurrentUser, project_id: Optional[int] = N
         stmt = stmt.where(Reference.project_id == project_id)
     total = (await db.execute(stmt)).scalar_one()
 
-    by_type_rows = await db.execute(
-        select(Reference.source_type, func.count(Reference.id))
-        .group_by(Reference.source_type)
-    )
+    by_type_stmt = select(Reference.source_type, func.count(Reference.id))
+    if project_id:
+        by_type_stmt = by_type_stmt.where(Reference.project_id == project_id)
+    by_type_rows = await db.execute(by_type_stmt.group_by(Reference.source_type))
     by_type = {row[0]: row[1] for row in by_type_rows}
 
     return {"total": total, "by_type": by_type}
@@ -134,6 +159,7 @@ async def list_references(
     db: DB,
     current_user: CurrentUser,
     collection_id: Optional[int] = Query(None),
+    project_id: Optional[int] = Query(None),
     source_type: Optional[str] = Query(None),
     limit: int = Query(50, le=200),
     offset: int = Query(0),
@@ -141,6 +167,8 @@ async def list_references(
     stmt = select(Reference).options(selectinload(Reference.tags))
     if collection_id is not None:
         stmt = stmt.where(Reference.collection_id == collection_id)
+    if project_id is not None:
+        stmt = stmt.where(Reference.project_id == project_id)
     if source_type:
         stmt = stmt.where(Reference.source_type == source_type)
     stmt = stmt.order_by(Reference.created_at.desc()).offset(offset).limit(limit)
@@ -163,6 +191,9 @@ async def update_reference(ref_id: int, data: ReferenceUpdate, db: DB, current_u
     ref = result.scalar_one_or_none()
     if not ref:
         raise HTTPException(status_code=404, detail="Reference not found")
+
+    if data.collection_id is not None:
+        ref.project_id = await _resolve_project_id(db, data.collection_id, ref.project_id)
 
     for field in ["title", "authors", "year", "source_type", "abstract", "summary",
                   "url", "collection_id", "notes", "read_status"]:
@@ -278,6 +309,7 @@ async def _ingest_pdf_and_save(
     db, content: bytes, filename: str, model: str,
     collection_id: Optional[int], project_id: Optional[int], user_id: int,
 ) -> dict:
+    project_id = await _resolve_project_id(db, collection_id, project_id)
     meta = await ingestion.ingest_file(content, filename, model)
     ref = Reference(
         title=meta.get("title", filename),
@@ -330,7 +362,7 @@ async def upload_bulk(
             failed.append({"filename": f.filename, "error": str(e)})
 
     return {
-        "total": len(pdf_files),
+        "total": len(valid_files),
         "succeeded": len(succeeded),
         "failed": len(failed),
         "results": succeeded,
@@ -397,9 +429,33 @@ async def from_urls_bulk(data: BulkUrlRequest, db: DB, current_user: CurrentUser
     if not urls:
         raise HTTPException(status_code=400, detail="No URLs provided")
 
+    project_id = await _resolve_project_id(db, data.collection_id, data.project_id)
+
     async def ingest_one(url: str) -> dict:
         try:
             meta = await ingestion.ingest_url(url, data.model)
+            return {"url": url, "meta": meta, "status": "ok"}
+        except Exception as e:
+            return {"url": url, "status": "error", "error": str(e)}
+
+    # Fetch and summarize concurrently, then write sequentially with one DB session.
+    sem = asyncio.Semaphore(4)
+
+    async def bounded(url):
+        async with sem:
+            return await ingest_one(url)
+
+    ingest_results = await asyncio.gather(*[bounded(u) for u in urls])
+
+    succeeded, failed = [], []
+    for result in ingest_results:
+        if result["status"] == "error":
+            failed.append({"url": result["url"], "status": "error", "error": result["error"]})
+            continue
+
+        try:
+            url = result["url"]
+            meta = result["meta"]
             ref = Reference(
                 title=meta.get("title", url),
                 authors=meta.get("authors"),
@@ -410,7 +466,7 @@ async def from_urls_bulk(data: BulkUrlRequest, db: DB, current_user: CurrentUser
                 url=url,
                 full_text=meta.get("full_text"),
                 collection_id=data.collection_id,
-                project_id=data.project_id,
+                project_id=project_id,
                 created_by=current_user.id,
                 extra_metadata=meta.get("extra_metadata"),
             )
@@ -419,20 +475,9 @@ async def from_urls_bulk(data: BulkUrlRequest, db: DB, current_user: CurrentUser
             for tag in meta.get("tags", []):
                 db.add(ReferenceTag(reference_id=ref.id, tag=tag.strip().lower()))
             await db.flush()
-            return {"url": url, "title": meta.get("title", url), "id": ref.id, "status": "ok"}
+            succeeded.append({"url": url, "title": meta.get("title", url), "id": ref.id, "status": "ok"})
         except Exception as e:
-            return {"url": url, "status": "error", "error": str(e)}
-
-    # Process concurrently with a semaphore to avoid hammering the AI API
-    sem = asyncio.Semaphore(4)
-
-    async def bounded(url):
-        async with sem:
-            return await ingest_one(url)
-
-    results = await asyncio.gather(*[bounded(u) for u in urls])
-    succeeded = [r for r in results if r["status"] == "ok"]
-    failed = [r for r in results if r["status"] == "error"]
+            failed.append({"url": result["url"], "status": "error", "error": str(e)})
 
     return {
         "total": len(urls),

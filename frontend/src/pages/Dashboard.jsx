@@ -31,12 +31,13 @@ export default function Dashboard() {
   const { data: stats } = useQuery({
     queryKey: ['ref-stats', currentProject?.id],
     queryFn: () => referencesApi.stats(currentProject ? { project_id: currentProject.id } : {}).then(r => r.data),
-    enabled: true,
+    enabled: !!currentProject,
   })
 
   const { data: recentRefs = [] } = useQuery({
-    queryKey: ['references', 'recent'],
-    queryFn: () => referencesApi.list({ limit: 5 }).then(r => r.data),
+    queryKey: ['references', 'recent', currentProject?.id],
+    queryFn: () => referencesApi.list({ project_id: currentProject?.id, limit: 5 }).then(r => r.data),
+    enabled: !!currentProject,
   })
 
   const { data: queueItems = [] } = useQuery({
