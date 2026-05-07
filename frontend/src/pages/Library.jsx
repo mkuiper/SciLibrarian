@@ -5,7 +5,7 @@ import { referencesApi, collectionsApi, searchApi } from '../api/client'
 import { useProject } from '../hooks/useProject'
 import ReferenceCard from '../components/ReferenceCard'
 import AddReferenceModal from '../components/AddReferenceModal'
-import { Plus, Search, FolderPlus, Loader2, X, Star, Eye, Filter } from 'lucide-react'
+import { Plus, Search, FolderPlus, Loader2, X, Star, Eye, ChevronDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const SOURCE_TYPES = ['paper', 'policy', 'model_card', 'evaluation', 'government', 'news', 'other']
@@ -36,21 +36,14 @@ function NewCollectionForm({ parentId, projectId, onDone }) {
     <form onSubmit={submit} className="card p-4 mb-4">
       <h3 className="text-sm font-semibold text-gray-700 mb-3">New collection</h3>
       <div className="flex gap-2">
-        <input
-          className="input flex-1"
-          placeholder="Collection name"
-          required
-          value={name}
-          onChange={e => setName(e.target.value)}
-          autoFocus
-        />
+        <input className="input flex-1" placeholder="Collection name" required value={name} onChange={e => setName(e.target.value)} autoFocus />
         <button type="submit" disabled={loading} className="btn-primary text-xs px-3">
           {loading ? <Loader2 size={12} className="animate-spin" /> : 'Create'}
         </button>
         <button type="button" onClick={onDone} className="btn-ghost text-xs">Cancel</button>
       </div>
       {!projectId && (
-        <p className="text-xs text-amber-500 mt-2">⚠ No project selected — create a project first to organise collections.</p>
+        <p className="text-xs text-amber-500 mt-2">⚠ No project selected — create a project first.</p>
       )}
     </form>
   )
@@ -64,10 +57,14 @@ export default function Library() {
 
   const [showAdd, setShowAdd] = useState(false)
   const [showNewCol, setShowNewCol] = useState(false)
+  const [showFilters, setShowFilters] = useState(false)
   const [searchQ, setSearchQ] = useState('')
   const [filterType, setFilterType] = useState('')
   const [filterStarred, setFilterStarred] = useState(false)
   const [filterUnread, setFilterUnread] = useState(false)
+  const [filterImportant, setFilterImportant] = useState(false)
+  const [yearFrom, setYearFrom] = useState('')
+  const [yearTo, setYearTo] = useState('')
   const [sortBy, setSortBy] = useState('recent')
 
   const { data: collection } = useQuery({
@@ -76,77 +73,71 @@ export default function Library() {
     enabled: !!colId,
   })
 
+  // Build server-side filter params shared by both list and search queries
+  const serverFilters = {
+    project_id: projectId,
+    collection_id: colId,
+    source_type: filterType || undefined,
+    starred: filterStarred ? true : undefined,
+    read_status: filterImportant ? 'important' : (filterUnread ? 'unread' : undefined),
+    year_from: yearFrom ? parseInt(yearFrom) : undefined,
+    year_to: yearTo ? parseInt(yearTo) : undefined,
+  }
+
+  const isSearching = searchQ && searchQ.length > 2
+
   const { data: refs = [], isLoading } = useQuery({
-    queryKey: ['references', projectId, colId, filterType, filterStarred, filterUnread],
-    queryFn: () => referencesApi.list({
-      project_id: projectId,
-      collection_id: colId,
-      source_type: filterType || undefined,
-      limit: 200,
-    }).then(r => r.data),
-    enabled: !searchQ,
+    queryKey: ['references', projectId, colId, filterType, filterStarred, filterUnread, filterImportant, yearFrom, yearTo],
+    queryFn: () => referencesApi.list({ ...serverFilters, limit: 200 }).then(r => r.data),
+    enabled: !isSearching,
   })
 
   const { data: searchResults } = useQuery({
-    queryKey: ['search', projectId, searchQ, colId, filterType],
-    queryFn: () => searchApi.search({ q: searchQ, project_id: projectId, collection_id: colId, source_type: filterType || undefined }).then(r => r.data),
-    enabled: !!searchQ && searchQ.length > 2,
+    queryKey: ['search', projectId, searchQ, colId, filterType, filterStarred, filterUnread, filterImportant, yearFrom, yearTo],
+    queryFn: () => searchApi.search({ ...serverFilters, q: searchQ }).then(r => r.data),
+    enabled: !!isSearching,
   })
 
-  let displayRefs = searchQ && searchQ.length > 2 ? (searchResults?.results || []) : refs
+  let displayRefs = isSearching ? (searchResults?.results || []) : refs
+  const snippets = isSearching ? Object.fromEntries((searchResults?.results || []).map(r => [r.id, r.snippet])) : {}
 
-  // Client-side filters
-  if (filterStarred) displayRefs = displayRefs.filter(r => r.is_starred)
-  if (filterUnread) displayRefs = displayRefs.filter(r => r.read_status !== 'read')
-
-  // Sort
   if (sortBy === 'year') displayRefs = [...displayRefs].sort((a, b) => (b.year || 0) - (a.year || 0))
   else if (sortBy === 'title') displayRefs = [...displayRefs].sort((a, b) => a.title.localeCompare(b.title))
-  // default: recent (already ordered by created_at desc from API)
 
-  const starredCount = refs.filter(r => r.is_starred).length
-  const unreadCount = refs.filter(r => r.read_status === 'unread').length
+  const clearFilters = () => {
+    setFilterStarred(false); setFilterUnread(false); setFilterImportant(false)
+    setFilterType(''); setYearFrom(''); setYearTo('')
+  }
+  const hasFilters = filterStarred || filterUnread || filterImportant || filterType || yearFrom || yearTo
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-start justify-between mb-5">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">
-            {collection ? collection.name : 'Library'}
-          </h1>
-          {collection?.description && (
-            <p className="text-sm text-gray-500 mt-0.5">{collection.description}</p>
-          )}
-          {!collection && (
-            <p className="text-xs text-gray-400 mt-0.5">
-              All references · select a collection from the sidebar to filter
-            </p>
-          )}
+          <h1 className="text-xl font-bold text-gray-900">{collection ? collection.name : 'Library'}</h1>
+          {collection?.description && <p className="text-sm text-gray-500 mt-0.5">{collection.description}</p>}
+          {!collection && <p className="text-xs text-gray-400 mt-0.5">All references · select a collection from the sidebar to filter</p>}
         </div>
         <div className="flex gap-2">
           <button onClick={() => setShowNewCol(v => !v)} className="btn-secondary text-sm">
-            <FolderPlus size={14} />
-            New collection
+            <FolderPlus size={14} />New collection
           </button>
           <button onClick={() => setShowAdd(true)} className="btn-primary text-sm">
-            <Plus size={14} />
-            Add reference
+            <Plus size={14} />Add reference
           </button>
         </div>
       </div>
 
-      {showNewCol && (
-        <NewCollectionForm parentId={colId} projectId={projectId} onDone={() => setShowNewCol(false)} />
-      )}
+      {showNewCol && <NewCollectionForm parentId={colId} projectId={projectId} onDone={() => setShowNewCol(false)} />}
 
       {/* Search + filters */}
-      <div className="space-y-3 mb-5">
+      <div className="space-y-2 mb-5">
         <div className="flex gap-2">
           <div className="relative flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               className="input pl-9 text-sm"
-              placeholder="Search titles, abstracts, summaries, full text..."
+              placeholder="Search — full-text, ranked by relevance..."
               value={searchQ}
               onChange={e => setSearchQ(e.target.value)}
             />
@@ -165,34 +156,45 @@ export default function Library() {
             <option value="year">By year</option>
             <option value="title">A–Z</option>
           </select>
+          <button
+            onClick={() => setShowFilters(v => !v)}
+            className={`btn-ghost px-3 text-sm ${showFilters ? 'text-alexandria-600' : ''}`}
+            title="More filters"
+          >
+            <ChevronDown size={14} className={showFilters ? 'rotate-180' : ''} />
+          </button>
         </div>
 
+        {/* Expanded filter row */}
+        {showFilters && (
+          <div className="flex gap-2 items-center flex-wrap pl-1">
+            <span className="text-xs text-gray-400">Year:</span>
+            <input type="number" placeholder="From" className="input w-24 text-xs py-1" value={yearFrom} onChange={e => setYearFrom(e.target.value)} />
+            <span className="text-xs text-gray-400">–</span>
+            <input type="number" placeholder="To" className="input w-24 text-xs py-1" value={yearTo} onChange={e => setYearTo(e.target.value)} />
+          </div>
+        )}
+
         {/* Quick filters */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setFilterStarred(v => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
-              filterStarred ? 'bg-amber-50 text-amber-700 border-amber-300' : 'bg-white text-gray-500 border-gray-200 hover:border-amber-200'
-            }`}
-          >
-            <Star size={12} fill={filterStarred ? 'currentColor' : 'none'} />
-            Starred {starredCount > 0 && `(${starredCount})`}
-          </button>
-          <button
-            onClick={() => setFilterUnread(v => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
-              filterUnread ? 'bg-blue-50 text-blue-700 border-blue-300' : 'bg-white text-gray-500 border-gray-200 hover:border-blue-200'
-            }`}
-          >
-            <Eye size={12} />
-            Unread {unreadCount > 0 && `(${unreadCount})`}
-          </button>
-          {(filterStarred || filterUnread || filterType) && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {[
+            { label: 'Starred', icon: <Star size={12} />, active: filterStarred, toggle: () => setFilterStarred(v => !v) },
+            { label: 'Unread', icon: <Eye size={12} />, active: filterUnread, toggle: () => setFilterUnread(v => !v) },
+            { label: 'Important', icon: <span className="text-amber-500 font-bold text-xs">★</span>, active: filterImportant, toggle: () => setFilterImportant(v => !v) },
+          ].map(({ label, icon, active, toggle }) => (
             <button
-              onClick={() => { setFilterStarred(false); setFilterUnread(false); setFilterType('') }}
-              className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
+              key={label}
+              onClick={toggle}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
+                active ? 'bg-alexandria-50 text-alexandria-700 border-alexandria-300' : 'bg-white text-gray-500 border-gray-200 hover:border-alexandria-200'
+              }`}
             >
-              <X size={11} /> Clear filters
+              {icon}{label}
+            </button>
+          ))}
+          {hasFilters && (
+            <button onClick={clearFilters} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
+              <X size={11} /> Clear
             </button>
           )}
         </div>
@@ -206,14 +208,14 @@ export default function Library() {
         <div className="text-center py-16">
           <div className="text-5xl mb-4">📚</div>
           <h3 className="text-gray-500 font-medium">
-            {searchQ ? 'No results' : filterStarred ? 'No starred references' : filterUnread ? 'All references read!' : 'No references yet'}
+            {isSearching ? 'No results' : hasFilters ? 'No matching references' : 'No references yet'}
           </h3>
           <p className="text-gray-400 text-sm mt-1">
-            {searchQ ? 'Try different terms or ask Alexandria in the chat panel'
-              : filterStarred || filterUnread ? 'Clear the filter to see all references'
+            {isSearching ? 'Try different terms or ask Alexandria in the chat panel'
+              : hasFilters ? 'Clear the filter to see all references'
               : 'Click "Add reference" to get started'}
           </p>
-          {!searchQ && !filterStarred && !filterUnread && (
+          {!isSearching && !hasFilters && (
             <button onClick={() => setShowAdd(true)} className="btn-primary mt-4">
               <Plus size={14} /> Add reference
             </button>
@@ -222,21 +224,21 @@ export default function Library() {
       ) : (
         <div>
           <p className="text-xs text-gray-400 mb-3">
-            {searchQ ? `${displayRefs.length} results` : `${displayRefs.length} reference${displayRefs.length !== 1 ? 's' : ''}`}
+            {isSearching
+              ? `${searchResults?.total ?? displayRefs.length} results for "${searchQ}"`
+              : `${displayRefs.length} reference${displayRefs.length !== 1 ? 's' : ''}`}
             {collection && ` in ${collection.name}`}
           </p>
           <div className="space-y-2">
-            {displayRefs.map(r => <ReferenceCard key={r.id} reference={r} />)}
+            {displayRefs.map(r => (
+              <ReferenceCard key={r.id} reference={r} snippet={snippets[r.id]} />
+            ))}
           </div>
         </div>
       )}
 
       {showAdd && (
-        <AddReferenceModal
-          collectionId={colId}
-          projectId={projectId}
-          onClose={() => setShowAdd(false)}
-        />
+        <AddReferenceModal collectionId={colId} projectId={projectId} onClose={() => setShowAdd(false)} />
       )}
     </div>
   )

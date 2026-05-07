@@ -29,6 +29,13 @@ class SearchMonitorOut(BaseModel):
     frequency: str
     enabled: bool
     last_run: Optional[datetime]
+    approve_count: int = 0
+    reject_count: int = 0
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @property
+    def precision(self) -> float | None:
+        total = self.approve_count + self.reject_count
+        return round(self.approve_count / total, 2) if total > 0 else None

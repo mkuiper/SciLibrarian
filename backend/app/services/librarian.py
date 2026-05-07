@@ -33,7 +33,12 @@ Your role is to help researchers find, understand, and synthesise information.
 
 You have access to tools: always search the library before answering research questions.
 When the library lacks coverage, use web_search to supplement — but clearly distinguish
-library sources from web sources. Cite library references by exact title."""
+library sources from web sources.
+
+When citing library references, include the reference ID in brackets after the title:
+e.g. "...as shown in Attention Is All You Need [42]..."
+At the end of responses that draw on library content, add a "### Sources" section listing
+each cited library reference on its own line as: - [ID] Title"""
 
 TOOLS = [
     {
@@ -98,26 +103,28 @@ TOOLS = [
 
 # ── Tool implementations ──────────────────────────────────────────────────────
 
-async def _search_library(db: AsyncSession, query: str) -> list[dict]:
-    terms = query.lower().split()
-    conditions = []
-    for term in terms[:6]:
-        conditions.append(or_(
-            func.lower(Reference.title).contains(term),
-            func.lower(Reference.abstract).contains(term),
-            func.lower(Reference.summary).contains(term),
-            func.lower(Reference.authors).contains(term),
-            func.lower(Reference.full_text).contains(term),
-        ))
-    if not conditions:
+async def _search_library(db: AsyncSession, query: str, project_id: int | None = None) -> list[dict]:
+    q = query.strip()
+    if not q:
         return []
+
+    doc = func.concat(
+        func.coalesce(Reference.title, ''), ' ',
+        func.coalesce(Reference.abstract, ''), ' ',
+        func.coalesce(Reference.summary, ''),
+    )
+    tsvec = func.to_tsvector('english', doc)
+    tsq = func.plainto_tsquery('english', q)
+
     stmt = (
         select(Reference)
         .options(selectinload(Reference.tags))
-        .where(or_(*conditions))
-        .order_by(Reference.created_at.desc())
-        .limit(8)
+        .where(tsvec.op('@@')(tsq))
     )
+    if project_id:
+        stmt = stmt.where(Reference.project_id == project_id)
+    stmt = stmt.order_by(func.ts_rank_cd(tsvec, tsq).desc()).limit(8)
+
     result = await db.execute(stmt)
     return [
         {
@@ -180,9 +187,9 @@ async def _lookup_paper(query: str) -> list[dict]:
         return [{"error": str(e)}]
 
 
-async def _dispatch_tool(db: AsyncSession, name: str, args: dict) -> str:
+async def _dispatch_tool(db: AsyncSession, name: str, args: dict, project_id: int | None = None) -> str:
     if name == "search_library":
-        return json.dumps(await _search_library(db, args.get("query", "")))
+        return json.dumps(await _search_library(db, args.get("query", ""), project_id=project_id))
     if name == "get_full_text":
         return json.dumps(await _get_full_text(db, args.get("reference_id", 0)))
     if name == "web_search":
@@ -200,16 +207,17 @@ async def chat(
     model: str = "claude-sonnet-4-6",
     system_prompt: str | None = None,
     project_settings: dict | None = None,
+    project_id: int | None = None,
 ) -> AsyncIterator[str]:
     system = system_prompt or DEFAULT_SYSTEM_PROMPT
     if model.startswith("ollama/"):
-        async for chunk in _ollama_chat(db, messages, model, system, project_settings):
+        async for chunk in _ollama_chat(db, messages, model, system, project_settings, project_id=project_id):
             yield chunk
     elif model_supports_tools(model):
-        async for chunk in _cloud_chat_with_tools(db, messages, model, system, project_settings):
+        async for chunk in _cloud_chat_with_tools(db, messages, model, system, project_settings, project_id=project_id):
             yield chunk
     else:
-        async for chunk in _context_injection_chat(db, messages, model, system, project_settings):
+        async for chunk in _context_injection_chat(db, messages, model, system, project_settings, project_id=project_id):
             yield chunk
 
 
@@ -219,6 +227,7 @@ async def _ollama_chat(
     model: str,
     system: str,
     project_settings: dict | None = None,
+    project_id: int | None = None,
 ) -> AsyncIterator[str]:
     """
     Ollama chat using the native /api/chat API.
@@ -229,12 +238,12 @@ async def _ollama_chat(
     supports_tools = _ollama_model_supports_tools(model_name)
 
     if supports_tools:
-        async for chunk in _ollama_tool_loop(db, messages, model_name, system, project_settings):
+        async for chunk in _ollama_tool_loop(db, messages, model_name, system, project_settings, project_id=project_id):
             yield chunk
     else:
         # Pre-fetch library results and inject into context
         last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
-        results = await _search_library(db, last_user[:200])
+        results = await _search_library(db, last_user[:200], project_id=project_id)
         if results:
             augmented = system + "\n\nRelevant library references (auto-retrieved):\n" + json.dumps(results, indent=2)
         else:
@@ -252,6 +261,7 @@ async def _ollama_tool_loop(
     model_name: str,
     system: str,
     project_settings: dict | None = None,
+    project_id: int | None = None,
 ) -> AsyncIterator[str]:
     """Ollama tool-calling loop: handle tool calls, then stream final response."""
     from app.services.llm import _ollama_complete
@@ -284,7 +294,7 @@ async def _ollama_tool_loop(
                     args = json.loads(args)
             except Exception:
                 args = {}
-            tool_result = await _dispatch_tool(db, fn.get("name", ""), args)
+            tool_result = await _dispatch_tool(db, fn.get("name", ""), args, project_id=project_id)
             current_messages.append({
                 "role": "tool",
                 "content": tool_result,
@@ -303,6 +313,7 @@ async def _cloud_chat_with_tools(
     model: str,
     system: str,
     project_settings: dict | None = None,
+    project_id: int | None = None,
 ) -> AsyncIterator[str]:
     """Cloud provider chat with tool use (Claude, GPT-4o, Gemini)."""
     api_messages = [{"role": "system", "content": system}] + list(messages)
@@ -325,7 +336,7 @@ async def _cloud_chat_with_tools(
                     args = json.loads(tc.function.arguments)
                 except Exception:
                     args = {}
-                result = await _dispatch_tool(db, tc.function.name, args)
+                result = await _dispatch_tool(db, tc.function.name, args, project_id=project_id)
                 api_messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
@@ -343,11 +354,12 @@ async def _context_injection_chat(
     model: str,
     system: str,
     project_settings: dict | None = None,
+    project_id: int | None = None,
 ) -> AsyncIterator[str]:
     """Context injection for models without tool use."""
     from app.services.llm import stream_text
     last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
-    results = await _search_library(db, last_user[:200])
+    results = await _search_library(db, last_user[:200], project_id=project_id)
     if results:
         augmented = system + "\n\nRelevant library references:\n" + json.dumps(results, indent=2)
     else:

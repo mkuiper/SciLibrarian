@@ -341,9 +341,10 @@ export default function ReferencePage() {
           </button>
 
           {[
-            { status: 'unread',  icon: Eye,          label: 'Unread',   color: 'text-gray-500' },
-            { status: 'reading', icon: Clock,         label: 'Reading',  color: 'text-amber-600' },
-            { status: 'read',    icon: CheckCircle,   label: 'Read',     color: 'text-emerald-600' },
+            { status: 'unread',    icon: Eye,          label: 'Unread',     color: 'text-gray-500' },
+            { status: 'reading',   icon: Clock,        label: 'Reading',    color: 'text-amber-600' },
+            { status: 'read',      icon: CheckCircle,  label: 'Read',       color: 'text-emerald-600' },
+            { status: 'important', icon: CheckCircle,  label: 'Important',  color: 'text-alexandria-700' },
           ].map(({ status, icon: Icon, label, color }) => (
             <button
               key={status}
@@ -412,6 +413,33 @@ export default function ReferencePage() {
           </div>
         </div>
 
+        {/* Key Findings — from structured ingestion extraction */}
+        {ref.extra_metadata?.findings && (
+          <div className="mb-6">
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Key Findings</h2>
+            <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 space-y-3">
+              {ref.extra_metadata.findings.main_finding && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-0.5">Main finding</p>
+                  <p className="text-sm text-gray-800">{ref.extra_metadata.findings.main_finding}</p>
+                </div>
+              )}
+              {ref.extra_metadata.findings.method && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-0.5">Method / approach</p>
+                  <p className="text-sm text-gray-700">{ref.extra_metadata.findings.method}</p>
+                </div>
+              )}
+              {ref.extra_metadata.findings.limitations && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-0.5">Limitations</p>
+                  <p className="text-sm text-gray-600 italic">{ref.extra_metadata.findings.limitations}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Abstract */}
         <div className="mb-6">
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Abstract</h2>
@@ -432,15 +460,15 @@ export default function ReferencePage() {
           />
         </div>
 
-        {/* Extra metadata */}
-        {ref.extra_metadata && Object.keys(ref.extra_metadata).length > 0 && (
+        {/* Extra metadata (excludes findings which are shown above) */}
+        {ref.extra_metadata && Object.entries(ref.extra_metadata).some(([k, v]) => k !== 'findings' && v) && (
           <div className="mb-6">
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Metadata</h2>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
-              {Object.entries(ref.extra_metadata).map(([k, v]) => v ? (
+              {Object.entries(ref.extra_metadata).filter(([k]) => k !== 'findings').map(([k, v]) => v ? (
                 <div key={k}>
                   <dt className="text-xs text-gray-400 capitalize">{k.replace(/_/g, ' ')}</dt>
-                  <dd className="text-sm text-gray-700 break-all">{String(v)}</dd>
+                  <dd className="text-sm text-gray-700 break-all">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</dd>
                 </div>
               ) : null)}
             </dl>

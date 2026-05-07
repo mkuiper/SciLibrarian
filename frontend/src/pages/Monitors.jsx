@@ -142,6 +142,18 @@ function MonitorCard({ monitor }) {
               </>
             )}
           </div>
+          {(monitor.approve_count + monitor.reject_count) > 0 && (
+            <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
+              <span className="text-emerald-600">✓ {monitor.approve_count} approved</span>
+              <span className="text-red-400">✗ {monitor.reject_count} rejected</span>
+              <span className={`font-medium ${
+                (monitor.approve_count / (monitor.approve_count + monitor.reject_count)) >= 0.6
+                  ? 'text-emerald-600' : 'text-amber-500'
+              }`}>
+                {Math.round(100 * monitor.approve_count / (monitor.approve_count + monitor.reject_count))}% precision
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex gap-1.5">
           <button onClick={runNow} disabled={running} className="btn-ghost p-2" title="Run now">

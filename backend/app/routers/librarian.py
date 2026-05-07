@@ -30,7 +30,7 @@ async def chat_endpoint(request: ChatRequest, db: DB, current_user: CurrentUser)
             project_settings = project.settings
 
     async def generate():
-        async for chunk in chat(db, request.messages, request.model, system_prompt, project_settings):
+        async for chunk in chat(db, request.messages, request.model, system_prompt, project_settings, project_id=request.project_id):
             yield chunk
 
     return StreamingResponse(generate(), media_type="text/plain")

@@ -40,6 +40,7 @@ export const projectsApi = {
   createDigest: (id, data) => api.post(`/projects/${id}/digests`, data, { timeout: 180000 }),
   getDigest: (projectId, digestId) => api.get(`/projects/${projectId}/digests/${digestId}`),
   deleteDigest: (projectId, digestId) => api.delete(`/projects/${projectId}/digests/${digestId}`),
+  getRadar: (id) => api.get(`/projects/${id}/radar`),
   listWatchRequests: (id) => api.get(`/projects/${id}/watch-requests`),
   createWatchRequest: (id, data) => api.post(`/projects/${id}/watch-requests`, data),
   deleteWatchRequest: (projectId, reqId) => api.delete(`/projects/${projectId}/watch-requests/${reqId}`),

@@ -38,6 +38,12 @@ _MIGRATIONS = [
     'ALTER TABLE review_queue ADD COLUMN IF NOT EXISTS collection_id INTEGER REFERENCES collections(id)',
     'ALTER TABLE search_monitors ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id)',
     'ALTER TABLE review_queue ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id)',
+    # Round 1: FTS index (weighted: title A > abstract B > summary C)
+    'CREATE INDEX IF NOT EXISTS ix_references_fts ON "references" USING GIN ('
+    ' to_tsvector(\'english\', concat(coalesce(title,\'\'), \' \', coalesce(abstract,\'\'), \' \', coalesce(summary,\'\'))))',
+    # Round 8: Monitor quality metrics
+    'ALTER TABLE search_monitors ADD COLUMN IF NOT EXISTS approve_count INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE search_monitors ADD COLUMN IF NOT EXISTS reject_count INTEGER NOT NULL DEFAULT 0',
 ]
 
 

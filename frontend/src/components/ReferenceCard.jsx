@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { referencesApi } from '../api/client'
-import { FileText, Globe, Shield, Cpu, ClipboardList, Newspaper, ExternalLink, Star, Eye, CheckCircle, Clock } from 'lucide-react'
+import { FileText, Globe, Shield, Cpu, ClipboardList, Newspaper, ExternalLink, Star, Eye, CheckCircle, Clock, Bookmark } from 'lucide-react'
 import clsx from 'clsx'
 
 const TYPE_CONFIG = {
@@ -15,13 +15,23 @@ const TYPE_CONFIG = {
   other:       { icon: Globe,         color: 'bg-gray-50 text-gray-600',      label: 'Other' },
 }
 
+// Cycle: unread → reading → read → important → unread
 const READ_CONFIG = {
-  unread:  { icon: Eye,          color: 'text-gray-300',       next: 'reading', label: 'Mark as reading' },
-  reading: { icon: Clock,        color: 'text-amber-400',      next: 'read',    label: 'Mark as read' },
-  read:    { icon: CheckCircle,  color: 'text-emerald-500',    next: 'unread',  label: 'Mark as unread' },
+  unread:    { icon: Eye,         color: 'text-gray-300',       next: 'reading',   label: 'Mark as reading' },
+  reading:   { icon: Clock,       color: 'text-amber-400',      next: 'read',      label: 'Mark as read' },
+  read:      { icon: CheckCircle, color: 'text-emerald-500',    next: 'important', label: 'Mark as important' },
+  important: { icon: Bookmark,    color: 'text-alexandria-600', next: 'unread',    label: 'Clear status' },
+  flagged:   { icon: Bookmark,    color: 'text-red-400',        next: 'unread',    label: 'Clear status' },
 }
 
-export default function ReferenceCard({ reference: r, showControls = true }) {
+const STATUS_BADGE = {
+  read:      'badge bg-emerald-50 text-emerald-600 text-xs',
+  reading:   'badge bg-amber-50 text-amber-600 text-xs',
+  important: 'badge bg-alexandria-50 text-alexandria-700 text-xs',
+  flagged:   'badge bg-red-50 text-red-600 text-xs',
+}
+
+export default function ReferenceCard({ reference: r, showControls = true, snippet }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [optimisticStarred, setOptimisticStarred] = useState(null)
@@ -42,7 +52,7 @@ export default function ReferenceCard({ reference: r, showControls = true }) {
       await referencesApi.update(r.id, { is_starred: !isStarred })
       queryClient.invalidateQueries({ queryKey: ['references'] })
     } catch {
-      setOptimisticStarred(isStarred) // revert
+      setOptimisticStarred(isStarred)
     }
   }
 
@@ -54,9 +64,12 @@ export default function ReferenceCard({ reference: r, showControls = true }) {
       await referencesApi.update(r.id, { read_status: next })
       queryClient.invalidateQueries({ queryKey: ['references'] })
     } catch {
-      setOptimisticRead(readStatus) // revert
+      setOptimisticRead(readStatus)
     }
   }
+
+  // Show snippet (from FTS) if provided, otherwise show summary
+  const bodyText = snippet || r.summary
 
   return (
     <div
@@ -74,11 +87,8 @@ export default function ReferenceCard({ reference: r, showControls = true }) {
               {config.label}
             </span>
             {r.year && <span className="text-xs text-gray-400">{r.year}</span>}
-            {readStatus === 'read' && (
-              <span className="badge bg-emerald-50 text-emerald-600 text-xs">read</span>
-            )}
-            {readStatus === 'reading' && (
-              <span className="badge bg-amber-50 text-amber-600 text-xs">reading</span>
+            {STATUS_BADGE[readStatus] && (
+              <span className={STATUS_BADGE[readStatus]}>{readStatus}</span>
             )}
           </div>
           <h3 className="text-sm font-semibold text-gray-900 group-hover:text-alexandria-700 transition-colors line-clamp-2">
@@ -87,8 +97,13 @@ export default function ReferenceCard({ reference: r, showControls = true }) {
           {r.authors && (
             <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{r.authors}</p>
           )}
-          {r.summary && (
-            <p className="text-xs text-gray-500 mt-1.5 line-clamp-2 leading-relaxed">{r.summary}</p>
+          {bodyText && (
+            <p className={clsx(
+              'text-xs text-gray-500 mt-1.5 line-clamp-2 leading-relaxed',
+              snippet && 'italic text-gray-600'
+            )}>
+              {bodyText}
+            </p>
           )}
           {r.tags?.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-2">

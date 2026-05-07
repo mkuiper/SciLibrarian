@@ -133,12 +133,28 @@ Return JSON with these fields:
 - year: integer (publication year, or null)
 - source_type: one of {SOURCE_TYPES}
 - abstract: string (2-3 sentence abstract or description)
-- summary: string (concise 5-7 sentence summary of key points and relevance to AI safety)
+- summary: string (concise 5-7 sentence summary of key points and relevance)
 - tags: array of strings (5-10 relevant topic tags, lowercase, no spaces)
-- extra_metadata: object with any other relevant fields (journal, doi, institution, etc.)"""
+- main_finding: string (the single most important claim or result, one sentence, or null)
+- method: string (primary method, model, or technique used, or null)
+- limitations: string (key limitations or caveats mentioned, or null)
+- extra_metadata: object with any other relevant fields (journal, doi, institution, arxiv_id, etc.)"""
 
-    raw = await complete_text(model, prompt, max_tokens=1500)
-    return _parse_json_response(raw)
+    raw = await complete_text(model, prompt, max_tokens=1800)
+    meta = _parse_json_response(raw)
+
+    # Move findings into extra_metadata.findings to keep schema stable
+    findings = {}
+    for key in ("main_finding", "method", "limitations"):
+        val = meta.pop(key, None)
+        if val and isinstance(val, str) and val.strip():
+            findings[key] = val.strip()
+    if findings:
+        extra = meta.setdefault("extra_metadata", {}) or {}
+        extra["findings"] = findings
+        meta["extra_metadata"] = extra
+
+    return meta
 
 
 async def save_upload(file_bytes: bytes, original_filename: str) -> str:

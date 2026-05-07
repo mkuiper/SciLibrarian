@@ -1,9 +1,48 @@
 import { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import { librarianApi, projectsApi } from '../api/client'
-import { Send, Loader2, BookOpen, Settings } from 'lucide-react'
+import { Send, Loader2, BookOpen, Settings, ExternalLink } from 'lucide-react'
 import toast from 'react-hot-toast'
+
+// Parse the optional "### Sources" section appended by Alexandria
+function parseSourcesFromResponse(text) {
+  const marker = '\n### Sources\n'
+  const idx = text.lastIndexOf(marker)
+  if (idx === -1) return { content: text, sources: [] }
+
+  const content = text.slice(0, idx)
+  const sourceBlock = text.slice(idx + marker.length)
+  const sources = []
+  for (const line of sourceBlock.split('\n')) {
+    const m = line.match(/^-\s*\[(\d+)\]\s*(.+)/)
+    if (m) sources.push({ id: parseInt(m[1]), title: m[2].trim() })
+  }
+  return { content, sources }
+}
+
+function SourcesPanel({ sources }) {
+  const navigate = useNavigate()
+  if (!sources?.length) return null
+  return (
+    <div className="mt-3 pt-3 border-t border-gray-100">
+      <p className="text-xs font-semibold text-gray-400 mb-2">Library sources</p>
+      <div className="space-y-1">
+        {sources.map(s => (
+          <button
+            key={s.id}
+            onClick={() => navigate(`/references/${s.id}`)}
+            className="w-full text-left flex items-center gap-1.5 text-xs text-alexandria-600 hover:text-alexandria-800 transition-colors"
+          >
+            <ExternalLink size={10} className="flex-shrink-0" />
+            <span className="truncate">[{s.id}] {s.title}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function Message({ msg }) {
   const isUser = msg.role === 'user'
@@ -20,7 +59,10 @@ function Message({ msg }) {
         {isUser ? (
           <p className="text-sm">{msg.content}</p>
         ) : (
-          <div className="prose-alexandria"><ReactMarkdown>{msg.content}</ReactMarkdown></div>
+          <>
+            <div className="prose-alexandria"><ReactMarkdown>{msg.content}</ReactMarkdown></div>
+            <SourcesPanel sources={msg.sources} />
+          </>
         )}
       </div>
     </div>
@@ -71,7 +113,8 @@ export default function LibrarianPanel({ projectId }) {
         activeProjectId,
         (_, full) => setStreaming(full),
       )
-      setMessages(prev => [...prev, { role: 'assistant', content: finalText }])
+      const { content, sources } = parseSourcesFromResponse(finalText)
+      setMessages(prev => [...prev, { role: 'assistant', content, sources }])
     } catch {
       toast.error('Alexandria is unavailable. Check your API key and model settings.')
       setMessages(prev => prev.slice(0, -1))

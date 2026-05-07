@@ -238,6 +238,72 @@ async def delete_digest(project_id: int, digest_id: int, db: DB, current_user: C
     await db.delete(digest)
 
 
+@router.get("/{project_id}/radar", response_model=dict)
+async def project_radar(project_id: int, db: DB, current_user: CurrentUser):
+    """Return a situational briefing: recent additions, emerging tags, queue and monitor state."""
+    from datetime import timedelta
+    from sqlalchemy import func, desc
+    from app.models.reference import Reference, ReferenceTag
+    from app.models.review_queue import ReviewQueueItem
+    from app.models.search_monitor import SearchMonitor
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(days=7)
+    month_ago = now - timedelta(days=30)
+
+    new_7d = (await db.execute(
+        select(func.count(Reference.id)).where(
+            Reference.project_id == project_id,
+            Reference.created_at >= week_ago,
+        )
+    )).scalar_one()
+
+    recent_result = await db.execute(
+        select(Reference)
+        .where(Reference.project_id == project_id)
+        .order_by(Reference.created_at.desc())
+        .limit(6)
+    )
+    recent_refs = [
+        {"id": r.id, "title": r.title, "source_type": r.source_type,
+         "created_at": r.created_at.isoformat()}
+        for r in recent_result.scalars().all()
+    ]
+
+    tags_result = await db.execute(
+        select(ReferenceTag.tag, func.count(ReferenceTag.id).label("cnt"))
+        .join(Reference, ReferenceTag.reference_id == Reference.id)
+        .where(Reference.project_id == project_id, Reference.created_at >= month_ago)
+        .group_by(ReferenceTag.tag)
+        .order_by(desc("cnt"))
+        .limit(8)
+    )
+    recent_tags = [{"tag": row[0], "count": row[1]} for row in tags_result.all()]
+
+    pending_queue = (await db.execute(
+        select(func.count(ReviewQueueItem.id)).where(
+            ReviewQueueItem.project_id == project_id,
+            ReviewQueueItem.status == "pending",
+        )
+    )).scalar_one()
+
+    active_monitors = (await db.execute(
+        select(func.count(SearchMonitor.id)).where(
+            SearchMonitor.project_id == project_id,
+            SearchMonitor.enabled.is_(True),
+        )
+    )).scalar_one()
+
+    return {
+        "new_refs_7d": new_7d,
+        "recent_refs": recent_refs,
+        "recent_tags": recent_tags,
+        "pending_queue": pending_queue,
+        "active_monitors": active_monitors,
+    }
+
+
 @router.post("/{project_id}/watch-requests", response_model=WatchRequestOut, status_code=201)
 async def create_watch_request(project_id: int, data: WatchRequestCreate, db: DB, current_user: CurrentUser):
     req = WatchRequest(

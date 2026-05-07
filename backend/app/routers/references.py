@@ -19,6 +19,25 @@ from app.services import ingestion
 router = APIRouter(prefix="/references", tags=["references"])
 
 
+async def _find_duplicate(db, url: str | None, title: str, project_id: int | None) -> Reference | None:
+    """Return an existing Reference if URL or normalised title matches within the same project."""
+    from sqlalchemy import or_
+    scope = [Reference.project_id == project_id] if project_id else []
+
+    if url:
+        norm = url.rstrip('/')
+        stmt = select(Reference).where(or_(Reference.url == url, Reference.url == norm), *scope)
+        existing = (await db.execute(stmt)).scalar_one_or_none()
+        if existing:
+            return existing
+
+    norm_title = title.strip().lower()
+    if not norm_title:
+        return None
+    stmt = select(Reference).where(func.lower(func.trim(Reference.title)) == norm_title, *scope)
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
 async def _attach_tags(db: DB, ref: Reference, tags: list[str]):
     for existing in ref.tags:
         await db.delete(existing)
@@ -69,6 +88,11 @@ async def upload_file(
     project_id = await _resolve_project_id(db, collection_id, project_id)
     meta = await ingestion.ingest_file(content, file.filename, model)
 
+    existing = await _find_duplicate(db, meta.get("url"), meta.get("title", file.filename), project_id)
+    if existing:
+        result = await db.execute(select(Reference).options(selectinload(Reference.tags)).where(Reference.id == existing.id))
+        raise HTTPException(status_code=409, detail={"message": "Duplicate reference", "existing_id": existing.id, "existing_title": existing.title})
+
     ref = Reference(
         title=meta.get("title", file.filename),
         authors=meta.get("authors"),
@@ -108,7 +132,18 @@ async def ingest_from_url(
     current_user: CurrentUser = None,
 ):
     project_id = await _resolve_project_id(db, collection_id, project_id)
+
+    # Quick URL dedup before paying for ingestion
+    url_dup = await _find_duplicate(db, url, "", project_id)
+    if url_dup:
+        raise HTTPException(status_code=409, detail={"message": "Duplicate reference", "existing_id": url_dup.id, "existing_title": url_dup.title})
+
     meta = await ingestion.ingest_url(url, model)
+
+    # Title dedup after ingestion
+    title_dup = await _find_duplicate(db, None, meta.get("title", url), project_id)
+    if title_dup:
+        raise HTTPException(status_code=409, detail={"message": "Duplicate reference", "existing_id": title_dup.id, "existing_title": title_dup.title})
 
     ref = Reference(
         title=meta.get("title", url),

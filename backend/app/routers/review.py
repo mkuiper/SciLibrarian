@@ -67,6 +67,17 @@ async def decide(item_id: int, decision: ReviewDecision, db: DB, current_user: C
 
     item.reviewed_by = current_user.id
     item.reviewed_at = datetime.now(timezone.utc)
+
+    # Update monitor quality stats
+    if item.monitor_id:
+        monitor_result = await db.execute(select(SearchMonitor).where(SearchMonitor.id == item.monitor_id))
+        monitor = monitor_result.scalar_one_or_none()
+        if monitor:
+            if decision.action == "approve":
+                monitor.approve_count = (monitor.approve_count or 0) + 1
+            else:
+                monitor.reject_count = (monitor.reject_count or 0) + 1
+
     await db.flush()
     await db.refresh(item)
     return item

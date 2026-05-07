@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { projectsApi, referencesApi, reviewApi } from '../api/client'
 import { useAuth } from '../store/auth'
 import { useProject } from '../hooks/useProject'
-import { BookOpen, Inbox, Sparkles, Plus, ArrowRight, Radio } from 'lucide-react'
+import { BookOpen, Inbox, Sparkles, Plus, ArrowRight, Radio, Tag, TrendingUp } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
 function StatCard({ icon: Icon, label, value, color, onClick }) {
@@ -29,12 +29,6 @@ export default function Dashboard() {
     enabled: !!projectId,
   })
 
-  const { data: recentRefs = [] } = useQuery({
-    queryKey: ['references', 'recent', projectId],
-    queryFn: () => referencesApi.list({ project_id: projectId, limit: 5 }).then(r => r.data),
-    enabled: !!projectId,
-  })
-
   const { data: queueItems = [] } = useQuery({
     queryKey: ['review-queue', 'pending', projectId],
     queryFn: () => reviewApi.getQueue({ status: 'pending', project_id: projectId, limit: 5 }).then(r => r.data),
@@ -43,6 +37,13 @@ export default function Dashboard() {
   const { data: monitors = [] } = useQuery({
     queryKey: ['monitors', projectId],
     queryFn: () => reviewApi.listMonitors(projectId ? { project_id: projectId } : {}).then(r => r.data),
+  })
+
+  const { data: radar } = useQuery({
+    queryKey: ['radar', projectId],
+    queryFn: () => projectsApi.getRadar(projectId).then(r => r.data),
+    enabled: !!projectId,
+    staleTime: 60 * 1000,
   })
 
   const structure = currentProject?.initial_structure
@@ -80,6 +81,62 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Research Radar */}
+      {radar && (
+        <div className="card p-5 mb-6">
+          <div className="flex items-center gap-2 mb-4">
+            <TrendingUp size={15} className="text-alexandria-600" />
+            <h2 className="text-sm font-semibold text-gray-700">Research Radar</h2>
+            <span className="text-xs text-gray-400 ml-auto">last 7 days</span>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            {/* Recent additions */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-2">
+                {radar.new_refs_7d} new reference{radar.new_refs_7d !== 1 ? 's' : ''} this week
+              </p>
+              <div className="space-y-1.5">
+                {radar.recent_refs.slice(0, 4).map(r => (
+                  <button
+                    key={r.id}
+                    onClick={() => navigate(`/references/${r.id}`)}
+                    className="w-full text-left group"
+                  >
+                    <p className="text-xs text-gray-700 group-hover:text-alexandria-600 transition-colors line-clamp-1">{r.title}</p>
+                    <p className="text-xs text-gray-400">{formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}</p>
+                  </button>
+                ))}
+                {radar.recent_refs.length === 0 && (
+                  <p className="text-xs text-gray-400 italic">No new references this week</p>
+                )}
+              </div>
+            </div>
+
+            {/* Emerging themes */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-2">Trending topics (30 days)</p>
+              {radar.recent_tags.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {radar.recent_tags.map(({ tag, count }) => (
+                    <button
+                      key={tag}
+                      onClick={() => navigate(`/library?tag=${tag}`)}
+                      className="flex items-center gap-1 px-2 py-1 bg-gray-50 hover:bg-alexandria-50 rounded-md text-xs text-gray-600 hover:text-alexandria-700 transition-colors border border-gray-100"
+                    >
+                      <Tag size={9} />
+                      {tag}
+                      <span className="text-gray-400 text-xs">({count})</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">No tags yet — add references to see trends</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Source type breakdown */}
       {stats?.by_type && Object.keys(stats.by_type).length > 0 && (
         <div className="card p-5 mb-6">
@@ -100,42 +157,6 @@ export default function Dashboard() {
       )}
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-700">Recent additions</h2>
-            <button onClick={() => navigate('/library')} className="text-xs text-alexandria-600 hover:underline flex items-center gap-1">
-              View all <ArrowRight size={12} />
-            </button>
-          </div>
-          {recentRefs.length === 0 ? (
-            <p className="text-sm text-gray-400">No references yet. Add your first one from the Library.</p>
-          ) : (
-            <div className="space-y-3">
-              {recentRefs.map(ref => (
-                <button key={ref.id} onClick={() => navigate(`/references/${ref.id}`)} className="w-full text-left group">
-                  <p className="text-sm font-medium text-gray-800 group-hover:text-alexandria-600 transition-colors line-clamp-1">{ref.title}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {ref.authors?.split(',')[0] || 'Unknown'} · {formatDistanceToNow(new Date(ref.created_at), { addSuffix: true })}
-                  </p>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {currentProject && structure?.welcome_message && (
-          <div className="card p-5 bg-gradient-to-br from-slate-900 to-slate-800">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-6 h-6 rounded-full bg-alexandria-600 flex items-center justify-center text-white text-xs font-bold">A</div>
-              <span className="text-slate-300 text-xs font-medium">Alexandria</span>
-            </div>
-            <p className="text-slate-200 text-sm leading-relaxed italic">"{structure.welcome_message}"</p>
-            <button onClick={() => navigate('/digests')} className="mt-4 flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors">
-              <Sparkles size={12} />View monthly digest
-            </button>
-          </div>
-        )}
-
         {queueItems.length > 0 && (
           <div className="card p-5">
             <div className="flex items-center justify-between mb-4">
@@ -152,6 +173,19 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {currentProject && structure?.welcome_message && (
+          <div className="card p-5 bg-gradient-to-br from-slate-900 to-slate-800">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-6 h-6 rounded-full bg-alexandria-600 flex items-center justify-center text-white text-xs font-bold">A</div>
+              <span className="text-slate-300 text-xs font-medium">Alexandria</span>
+            </div>
+            <p className="text-slate-200 text-sm leading-relaxed italic">"{structure.welcome_message}"</p>
+            <button onClick={() => navigate('/digests')} className="mt-4 flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors">
+              <Sparkles size={12} />View monthly digest
+            </button>
           </div>
         )}
       </div>
