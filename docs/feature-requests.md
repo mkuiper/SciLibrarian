@@ -213,35 +213,63 @@ Why it matters:
 If this is used by a research group or institute, the app needs explicit team
 semantics. Until then, backend scoping should be conservative and clear.
 
-## Suggested Implementation Sequence
+## Implementation Status (as of 2026-05-08)
 
-### Phase 1: Trust Foundation
+### Phase 1: Trust Foundation — ✅ Complete
 
-- finish project scoping for monitors and review queue;
-- enforce project access consistently across direct reference endpoints;
-- repair local/Docker verification workflow;
-- add source citation plumbing to assistant and digest outputs.
+- ✅ Project scoping for monitors, review queue, and references
+- ✅ Source citation plumbing: Alexandria appends `### Sources` section with `[REF:ID]` links; frontend parses and displays them
+- ✅ project_id threaded through librarian chat so library search is project-scoped
+- ⬜ Enforce project access on direct reference endpoints (GET/PATCH/DELETE /{id}) — still open
 
-### Phase 2: Retrieval Quality
+### Phase 2: Retrieval Quality — ✅ Largely Complete
 
-- implement PostgreSQL full-text search with ranking and snippets;
-- add server-side pagination and filters;
-- improve deduplication using DOI, arXiv ID and normalized URL.
+- ✅ PostgreSQL FTS with `to_tsvector` / `plainto_tsquery`, GIN index, weighted ranking, `ts_headline` snippets
+- ✅ Server-side filters: year range, tag, source type, read status, starred
+- ✅ Deduplication at ingestion: URL and normalised title checks, 409 with existing_id on duplicate
+- ⬜ DOI / arXiv ID as indexed columns for stronger dedup (still open)
+- ⬜ Server-side pagination in the Library list view (currently fetches up to 200)
 
-### Phase 3: Research Synthesis
+### Phase 3: Research Synthesis — ✅ Largely Complete
 
-- add claim/finding extraction;
-- create a research radar view;
-- improve monthly digests with explicit evidence links.
+- ✅ Claim/finding extraction: `main_finding`, `method`, `limitations` extracted at ingestion into `extra_metadata.findings`
+- ✅ Research Radar: `GET /projects/{id}/radar` + Dashboard panel (new refs this week, trending tags)
+- ✅ Digest evidence links: digest prompts include full source material; three digest types
+- ✅ Monitor quality metrics: `approve_count` / `reject_count` per monitor + precision display
+- ⬜ Monitor learning from review history (query refinement suggestions) — open
 
-### Phase 4: Collaboration
+### Phase 4: Collaboration — ⬜ Not started
 
-- define project membership and roles;
-- add review assignments and shared annotations;
-- add monitor quality metrics and learning from review decisions.
+- ⬜ Project membership and roles
+- ⬜ Review assignments and shared annotations
+- ⬜ Activity history / audit log
+- ⬜ Notification settings for monitors and digests
+- ⬜ Team-scoped access control
 
-### Phase 5: Advanced Context
+### Phase 5: Advanced Context — ⬜ Not started
 
-- add citation graph and related-work views;
-- add hybrid embedding search if lexical search is no longer sufficient;
-- add living literature review generation and update workflows.
+- ⬜ Citation graph and related-work view
+- ⬜ Hybrid embedding + lexical search (pgvector)
+- ⬜ Living literature review generation
+
+---
+
+## Admin & Operator Tooling (added Cycle 9)
+
+- ✅ API key health checks: 1-token call per provider, inline Test button
+- ✅ System Status panel: DB stats, upload storage, scheduler state + next-run times
+- ✅ Scheduler pause/resume without container restart
+- ⬜ User management (list/deactivate users) — deferred until project membership model is in place
+- ⬜ Email ingestion config via UI (currently .env only)
+
+---
+
+## Suggested Next Focus
+
+The most impactful remaining work, in priority order:
+
+1. **Project access enforcement** on direct reference endpoints (security gap noted by Codex review)
+2. **DOI / arXiv ID deduplication** — add indexed columns, check at monitor queue and ingestion
+3. **Server-side Library pagination** — current 200-ref cap will become a problem as libraries grow
+4. **Monitor learning from review decisions** — summarise why recent rejections were off-target, suggest query refinements
+5. **Project membership and roles** — prerequisite for all team workflow features

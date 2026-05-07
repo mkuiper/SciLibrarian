@@ -133,6 +133,46 @@ These are all planned for future cycles.
 
 ---
 
+## PostgreSQL FTS replaces ILIKE substring search
+
+**Decision (Cycle 8):** Replace the `LIKE`/`ILIKE` substring scan with PostgreSQL native full-text search using `to_tsvector` / `plainto_tsquery` and a GIN index.
+
+**Rationale:** The ILIKE approach has O(n) scan cost and no ranking — every match is equal regardless of where the term appears. PostgreSQL FTS gives weighted ranking (title matches outrank body matches), `ts_headline` snippets showing the matching paragraph in context, and GIN index performance. The change required no schema migration — the index is created as a migration and the query is an expression-only change in `services/search.py`.
+
+**Trade-off:** `plainto_tsquery` tokenises and stems input, so very short or purely numeric queries (e.g. "2024") may return no results where ILIKE would. This is acceptable — researchers type multi-word queries and the FTS fallback returns full list for empty queries.
+
+---
+
+## Evidence trails via structured response parsing
+
+**Decision (Cycle 8):** Alexandria appends a `### Sources` section at the end of responses that draw on library content. The frontend parses and strips this section, displaying it separately as clickable reference links.
+
+**Rationale:** We considered two approaches: (1) structured metadata from the streaming API (tool call result tracking), and (2) asking the model to self-report citations in a parseable format. Option 1 requires significant changes to the streaming protocol and state management across the frontend/backend boundary. Option 2 is fragile if the model diverges from the format, but adds no protocol complexity and works across all model providers (not just Claude).
+
+**Chosen approach:** Option 2, with a clear format (`- [ID] Title`) that is easy to regex-parse even if extra text is present. The `lastIndexOf` strategy is robust to models that write additional text after the Sources section.
+
+**Limitation:** The model may fail to cite a reference it clearly used, or may hallucinate a reference ID. This is a known limitation of the approach and is documented to users by the "Library sources" header (not "All sources used").
+
+---
+
+## Findings extracted into extra_metadata, not new columns
+
+**Decision (Cycle 8):** `main_finding`, `method`, and `limitations` extracted at ingestion are stored in `extra_metadata.findings` rather than as first-class columns on the `references` table.
+
+**Rationale:** Adding three new TEXT columns to the references table requires a migration and makes the model wider. Since these fields may evolve (more fields, different naming) it is better to store them as a JSON sub-object. The reference detail page shows them from `extra_metadata.findings`; the FTS index and summary generation already use `summary` and `abstract` which contain equivalent information. If findings become a strong query axis (filter by method, etc.), a proper migration and index can be added later.
+
+---
+
+## Deduplication at ingest, not at import
+
+**Decision (Cycle 8):** Duplicate detection runs in the references router before creating any `Reference` row — URL exact match first (cheap), then normalised title match. Returns HTTP 409 with the existing reference's ID.
+
+**Rationale:** Inserting the row and cleaning up later is harder (FK cascades, stale cache, user confusion). Checking first is cheap because both queries use indexed columns. Returning the existing ID lets the frontend redirect to the duplicate rather than silently swallow the error, which is better UX. Dedup is project-scoped so the same paper can legitimately exist in two different projects.
+
+**Limitation:** Title dedup is case/whitespace normalised but not fuzzy. A paper with a subtitle variation ("… on AI Safety" vs "… in AI Safety") would not be caught. Full fuzzy dedup (similarity threshold) is deferred — it would require a more expensive query or a trigram index.
+
+---
+
 ## Authentication: JWT, no refresh tokens yet
 
 **Decision:** Simple JWT with 24-hour expiry. No refresh token flow in Cycle 1.

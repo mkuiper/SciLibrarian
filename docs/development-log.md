@@ -220,7 +220,81 @@ A chronological record of what was built each cycle and key decisions made along
   email ingestion, API key clarification, CLI usage, architecture overview
 - .env.example: full email ingestion config with Gmail setup notes
 
-## Planned: Cycle 8 (future)
+---
+
+## Cycle 8 — 2026-05-08 — Search Quality, Research Intelligence, Evidence Trails
+
+**Goal:** Eight targeted improvement rounds covering search quality, research workflow, AI output trust, and admin tooling.
+
+### Round 1 — PostgreSQL full-text search (`services/search.py`, `database.py`)
+- Replaced ILIKE substring scan with `to_tsvector` / `plainto_tsquery`
+- GIN index on `concat(title, abstract, summary)` added via migration
+- Weighted ranking: `ts_rank_cd` with title weighted higher
+- `ts_headline` snippets returned with every search result
+- Search service returns `(refs, snippets, total)` tuple
+
+### Round 2 — Search filter UI (`Library.jsx`, `ReferenceCard.jsx`)
+- Year-range inputs (`year_from` / `year_to`) added
+- `important` quick-filter added alongside starred/unread
+- All filters now sent server-side (were client-side)
+- FTS snippets displayed in italic below the title in search results
+
+### Round 3 — Ingestion deduplication (`routers/references.py`)
+- `_find_duplicate()` checks URL (exact) and normalised title before creating any Reference
+- Returns HTTP 409 with `existing_id` so the caller can redirect rather than lose work
+- URL check runs before the ingestion LLM call (saves API cost); title check runs after
+
+### Round 4 — Research Radar (`routers/projects.py`, `Dashboard.jsx`, `client.js`)
+- New `GET /projects/{id}/radar` endpoint: new refs in 7 days, recent additions, trending tags from 30 days, pending queue depth, active monitor count
+- Dashboard Radar panel sits above the library breakdown with two columns: recent additions and trending topic tags
+
+### Round 5 — Enhanced reading states (`ReferenceCard.jsx`, `ReferencePage.jsx`)
+- `important` added to the read_status cycle after `read` (unread → reading → read → important → unread)
+- Distinct bookmark icon and alexandria-brand colour
+- Status cycle accessible from both the card and the reference detail page
+
+### Round 6 — Evidence trails (`services/librarian.py`, `LibrarianPanel.jsx`)
+- `DEFAULT_SYSTEM_PROMPT` updated: Alexandria instructed to append a `### Sources` section with `[ID] Title` lines after library-grounded answers
+- Frontend `parseSourcesFromResponse()` strips the Sources block from the display text and shows it as a "Library sources" panel with clickable reference links
+- `project_id` threaded through the full chat call chain so library search is now project-scoped
+- `_search_library` upgraded to use FTS with `ts_rank_cd` ranking
+
+### Round 7 — Claim/finding extraction (`services/ingestion.py`, `ReferencePage.jsx`)
+- `generate_metadata` prompt now extracts `main_finding`, `method`, `limitations` alongside existing fields
+- These are moved into `extra_metadata.findings` to keep the Reference schema stable
+- Reference detail page shows a **Key Findings** card when findings are present
+- Findings key hidden from the raw Metadata section to avoid duplication
+
+### Round 8 — Monitor quality metrics (`models/search_monitor.py`, `routers/review.py`, `Monitors.jsx`)
+- `approve_count` and `reject_count` integer columns added to `search_monitors` (migration)
+- `decide()` endpoint increments the appropriate counter when a queue item has a `monitor_id`
+- MonitorCard shows approval/rejection counts and a precision percentage (approvals ÷ total decisions)
+
+---
+
+## Cycle 9 — 2026-05-08 — Admin Config Panel
+
+**Goal:** Give operators visibility into system health and confidence in API key configuration without needing terminal access.
+
+### API key health checks (`routers/config.py`, `ConfigPage.jsx`)
+- New `POST /config/test-key` endpoint accepts `provider` + optional `key`
+- Makes a real 1-token call to the provider (Haiku for Anthropic, GPT-4o-mini for OpenAI, Gemini Flash for Google)
+- Returns `{ok, model, latency_ms}` on success; categorised error message on failure (auth error, rate limit, quota exhausted, model not found)
+- Falls back to the `.env` key if the input field is empty
+- "Test" button renders inline with each API key field; shows ✓ model·ms or ✗ reason without refreshing the page
+
+### System Status panel (`routers/config.py`, `ConfigPage.jsx`)
+- New `GET /config/system` endpoint (requires DB dependency): database connection + reference count + pending queue depth, upload storage stats (file count, total MB, directory path), scheduler state (running/paused, next run times for monitor and digest jobs)
+- `SystemStatusPanel` React component with three status rows, placed at the top of the Config page
+- Refresh button; auto-refreshes on scheduler toggle
+
+### Scheduler pause/resume (`routers/config.py`, `ConfigPage.jsx`)
+- New `POST /config/scheduler/{pause|resume}` endpoint calls APScheduler's `.pause()` / `.resume()` in-process
+- Pause/Resume button on the Scheduler row; useful when bulk-importing references to suppress monitor competition
+
+---
+
+## Planned: Future Cycles
 
 - Alembic migration to add embedding column + pgvector extension enable
 - Background embedding generation for existing references
