@@ -1,8 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { configApi, librarianApi, projectsApi } from '../api/client'
-import { CheckCircle, XCircle, Loader2, RefreshCw, Server, Cpu, Mail, Search, Save, Plus, X } from 'lucide-react'
+import {
+  CheckCircle, XCircle, Loader2, RefreshCw, Server, Mail, Save,
+  Database, HardDrive, Clock, Play, Pause, Zap, AlertCircle,
+} from 'lucide-react'
 import toast from 'react-hot-toast'
+import { formatDistanceToNow, format } from 'date-fns'
 
 const DEFAULT_PROMPT = `You are Alexandria, an expert AI research librarian.
 Your role is to help researchers find, understand, and synthesise information from the reference library.
@@ -28,6 +32,169 @@ function Section({ title, children }) {
     </div>
   )
 }
+
+// ── API Key Test Button ───────────────────────────────────────────────────────
+
+function KeyTestButton({ provider, keyValue }) {
+  const [state, setState] = useState(null) // null | 'loading' | {ok, model, latency_ms, error}
+
+  const run = async () => {
+    setState('loading')
+    try {
+      const { data } = await configApi.testKey(provider, keyValue)
+      setState(data)
+    } catch {
+      setState({ ok: false, error: 'Request failed' })
+    }
+  }
+
+  if (state === 'loading') {
+    return (
+      <button disabled className="btn-ghost text-xs gap-1 opacity-60">
+        <Loader2 size={11} className="animate-spin" />Testing…
+      </button>
+    )
+  }
+
+  if (state?.ok) {
+    return (
+      <span className="flex items-center gap-1 text-xs text-emerald-600">
+        <CheckCircle size={12} />
+        {state.model?.split('/').pop() ?? 'OK'} · {state.latency_ms}ms
+      </span>
+    )
+  }
+
+  if (state?.ok === false) {
+    return (
+      <span className="flex items-center gap-1 text-xs text-red-500" title={state.error}>
+        <XCircle size={12} />
+        {state.error?.slice(0, 40) ?? 'Failed'}
+      </span>
+    )
+  }
+
+  return (
+    <button onClick={run} className="btn-ghost text-xs gap-1">
+      <Zap size={11} />Test
+    </button>
+  )
+}
+
+// ── System Status Panel ───────────────────────────────────────────────────────
+
+function SystemStatusPanel() {
+  const queryClient = useQueryClient()
+  const [schedulerBusy, setSchedulerBusy] = useState(false)
+
+  const { data: sys, isLoading, refetch } = useQuery({
+    queryKey: ['system-status'],
+    queryFn: () => configApi.systemStatus().then(r => r.data),
+    refetchInterval: false,
+    staleTime: 30_000,
+  })
+
+  const toggleScheduler = async () => {
+    if (!sys) return
+    const isPaused = sys.scheduler?.paused
+    const action = isPaused ? 'resume' : 'pause'
+    setSchedulerBusy(true)
+    try {
+      await configApi.schedulerControl(action)
+      toast.success(`Scheduler ${isPaused ? 'resumed' : 'paused'}`)
+      queryClient.invalidateQueries({ queryKey: ['system-status'] })
+      refetch()
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Scheduler control failed')
+    } finally {
+      setSchedulerBusy(false)
+    }
+  }
+
+  const nextRunLabel = (isoStr) => {
+    if (!isoStr) return 'not scheduled'
+    try {
+      const d = new Date(isoStr)
+      return `${formatDistanceToNow(d, { addSuffix: true })} (${format(d, 'd MMM HH:mm')} UTC)`
+    } catch { return isoStr }
+  }
+
+  const jobMap = {}
+  for (const j of sys?.scheduler?.jobs || []) jobMap[j.id] = j
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-gray-400 text-sm py-2">
+        <Loader2 size={14} className="animate-spin" />Loading system status…
+      </div>
+    )
+  }
+
+  if (!sys) return null
+
+  const rows = [
+    {
+      icon: Database,
+      label: 'Database',
+      ok: sys.database?.ok,
+      detail: sys.database?.ok
+        ? `${sys.database.reference_count} references · ${sys.database.pending_queue} pending review`
+        : 'Cannot connect',
+    },
+    {
+      icon: HardDrive,
+      label: 'Upload storage',
+      ok: true,
+      detail: `${sys.storage?.count ?? 0} file${sys.storage?.count !== 1 ? 's' : ''} · ${sys.storage?.total_mb ?? 0} MB  (${sys.storage?.upload_dir})`,
+    },
+    {
+      icon: Clock,
+      label: 'Scheduler',
+      ok: sys.scheduler?.running && !sys.scheduler?.paused,
+      detail: !sys.scheduler?.running
+        ? 'Not running'
+        : sys.scheduler?.paused
+        ? 'Paused'
+        : `Running · monitors: ${nextRunLabel(jobMap['run_monitors']?.next_run)} · digest: ${nextRunLabel(jobMap['monthly_digest']?.next_run)}`,
+      action: sys.scheduler?.running ? (
+        <button
+          onClick={toggleScheduler}
+          disabled={schedulerBusy}
+          className="btn-ghost text-xs gap-1 ml-2"
+          title={sys.scheduler?.paused ? 'Resume scheduler' : 'Pause scheduler'}
+        >
+          {schedulerBusy
+            ? <Loader2 size={11} className="animate-spin" />
+            : sys.scheduler?.paused ? <Play size={11} /> : <Pause size={11} />
+          }
+          {sys.scheduler?.paused ? 'Resume' : 'Pause'}
+        </button>
+      ) : null,
+    },
+  ]
+
+  return (
+    <div className="space-y-2">
+      {rows.map(({ icon: Icon, label, ok, detail, action }) => (
+        <div key={label} className="flex items-start gap-3 py-2 border-b border-gray-50 last:border-0">
+          <Icon size={15} className={ok ? 'text-emerald-500 mt-0.5 flex-shrink-0' : 'text-red-400 mt-0.5 flex-shrink-0'} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1">
+              <span className="text-sm font-medium text-gray-700">{label}</span>
+              {action}
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5 break-all">{detail}</p>
+          </div>
+        </div>
+      ))}
+      <button onClick={() => refetch()} className="btn-ghost text-xs mt-1 gap-1.5">
+        <RefreshCw size={11} />Refresh
+      </button>
+    </div>
+  )
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ConfigPage() {
   const queryClient = useQueryClient()
@@ -61,9 +228,11 @@ export default function ConfigPage() {
     digest_model: DEFAULT_MODEL,
     librarian_system_prompt: DEFAULT_PROMPT,
     digest_recipients: '',
+    anthropic_api_key: '',
+    openai_api_key: '',
+    gemini_api_key: '',
   })
 
-  // Sync form whenever the project loads or changes
   useEffect(() => {
     if (!project) return
     const s = project.settings || {}
@@ -153,7 +322,12 @@ export default function ConfigPage() {
         <p className="text-sm text-gray-500 mt-1">AI providers, model assignments, and system settings</p>
       </div>
 
-      {/* Provider status */}
+      {/* ── System Status ────────────────────────────────── */}
+      <Section title="System Status">
+        <SystemStatusPanel />
+      </Section>
+
+      {/* ── AI Provider Status ───────────────────────────── */}
       <Section title="AI Provider Status">
         {statusLoading ? (
           <div className="flex items-center gap-2 text-gray-400 text-sm"><Loader2 size={14} className="animate-spin" /> Checking...</div>
@@ -161,9 +335,9 @@ export default function ConfigPage() {
           <div className="space-y-2">
             {[
               ['Anthropic (Claude)', status.providers?.anthropic, 'ANTHROPIC_API_KEY'],
-              ['OpenAI (GPT-4o)', status.providers?.openai, 'OPENAI_API_KEY'],
-              ['Google (Gemini)', status.providers?.google, 'GEMINI_API_KEY'],
-              ['Ollama (local)', status.providers?.ollama, null],
+              ['OpenAI (GPT-4o)',    status.providers?.openai,    'OPENAI_API_KEY'],
+              ['Google (Gemini)',    status.providers?.google,    'GEMINI_API_KEY'],
+              ['Ollama (local)',     status.providers?.ollama,    null],
             ].map(([name, ok, envKey]) => (
               <div key={name} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
                 <div className="flex items-center gap-2">
@@ -183,7 +357,7 @@ export default function ConfigPage() {
         </button>
       </Section>
 
-      {/* Ollama panel */}
+      {/* ── Ollama panel ─────────────────────────────────── */}
       <Section title="Ollama (Local Models)">
         <div className="flex items-center gap-2 mb-4">
           <Server size={16} className={ollamaInfo?.connected ? 'text-emerald-500' : 'text-red-400'} />
@@ -213,89 +387,57 @@ export default function ConfigPage() {
 
         {!ollamaInfo?.connected && (
           <div className="space-y-4">
-            {/* Option A: Docker built-in Ollama (recommended) */}
             <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
               <p className="font-semibold text-emerald-800 text-sm mb-1">
-                Option A — Ollama inside Docker (recommended, no configuration needed)
+                Option A — Ollama inside Docker (recommended)
               </p>
               <p className="text-emerald-700 text-xs mb-3">
                 Stop the current stack and restart with the Ollama profile. Models are stored in a Docker volume.
               </p>
               <pre className="bg-emerald-100 rounded px-3 py-2 text-xs font-mono text-emerald-900 whitespace-pre-wrap">
-{`# In your terminal (outside Docker):
-docker-compose down
+{`docker-compose down
 docker-compose --profile ollama up --build
 
-# Then pull models (in another terminal):
+# Pull models (in another terminal):
 docker-compose exec ollama ollama pull gemma4
 docker-compose exec ollama ollama pull qwen3.5:9b`}
               </pre>
-              <p className="text-emerald-600 text-xs mt-2">
-                The backend will automatically find Ollama at <code className="bg-emerald-100 px-1 rounded">http://ollama:11434</code>.
-                Update <code className="bg-emerald-100 px-1 rounded">OLLAMA_BASE_URL=http://ollama:11434</code> in your <code>.env</code> file.
-              </p>
             </div>
 
-            {/* Option B: Fix host Ollama */}
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <p className="font-semibold text-amber-800 text-sm mb-1">
-                Option B — Fix your host Ollama (systemd service)
-              </p>
-              <p className="text-amber-700 text-xs mb-3">
-                Ollama is managed by systemd and restarting itself. Use <code className="bg-amber-100 px-1 rounded">systemctl</code> to reconfigure it:
+                Option B — Fix host Ollama (systemd)
               </p>
               <pre className="bg-amber-100 rounded px-3 py-2 text-xs font-mono text-amber-900 whitespace-pre-wrap">
-{`# 1. Stop the systemd service properly
-sudo systemctl stop ollama
-
-# 2. Add OLLAMA_HOST=0.0.0.0 to the service
+{`sudo systemctl stop ollama
 sudo systemctl edit ollama
-# In the editor, add:
-#   [Service]
-#   Environment="OLLAMA_HOST=0.0.0.0"
-
-# 3. Reload and start
-sudo systemctl daemon-reload
-sudo systemctl start ollama
-
-# 4. Verify — should show *:11434
-ss -tlnp | grep 11434`}
+# Add: [Service]
+#      Environment="OLLAMA_HOST=0.0.0.0"
+sudo systemctl daemon-reload && sudo systemctl start ollama`}
               </pre>
             </div>
 
             <p className="text-xs text-gray-400">
-              Current URL being checked: <code className="bg-gray-100 px-1 rounded">{ollamaInfo?.base_url || 'http://host.docker.internal:11434'}</code>
-              {' '}· After fixing, click <strong>Test</strong> above.
+              Current URL: <code className="bg-gray-100 px-1 rounded">{ollamaInfo?.base_url || 'http://host.docker.internal:11434'}</code>
+              {' '}· Click <strong>Test</strong> after fixing.
             </p>
           </div>
         )}
       </Section>
 
-      {/* Per-agent model assignment */}
+      {/* ── Agent model assignment ────────────────────────── */}
       <Section title="Agent Model Assignment">
         <p className="text-xs text-gray-400 mb-4">
           Assign different models to each task. Use a fast local model for ingestion, a smarter model for the librarian chat.
         </p>
         <div className="space-y-4">
-          <ModelSelect
-            label="Alexandria (librarian chat)"
-            field="librarian_model"
-            help="Handles all chat queries. Benefits most from a capable model."
-          />
-          <ModelSelect
-            label="Ingestion (PDF & URL processing)"
-            field="ingestion_model"
-            help="Generates metadata, summaries, and tags. A faster model is fine here."
-          />
-          <ModelSelect
-            label="Digest generation"
-            field="digest_model"
-            help="Writes monthly synthesis reports. Use a model with a large context window."
-          />
+          <ModelSelect label="Alexandria (librarian chat)"  field="librarian_model" help="Handles all chat queries. Benefits most from a capable model." />
+          <ModelSelect label="Ingestion (PDF & URL processing)" field="ingestion_model" help="Generates metadata, summaries, and tags. A faster model is fine here." />
+          <ModelSelect label="Digest generation" field="digest_model" help="Writes synthesis reports. Use a model with a large context window." />
         </div>
       </Section>
 
-      {/* System prompt */}
+      {/* ── Alexandria's instructions ─────────────────────── */}
       <Section title="Alexandria's Instructions">
         <p className="text-xs text-gray-400 mb-3">
           Customise how Alexandria behaves. Add domain-specific focus, citation styles, or priorities.
@@ -315,35 +457,41 @@ ss -tlnp | grep 11434`}
         </button>
       </Section>
 
-      {/* Per-project API key overrides */}
+      {/* ── API key overrides ─────────────────────────────── */}
       <Section title="API Key Overrides">
         <p className="text-xs text-gray-400 mb-4">
           Override the system API keys (set in <code className="bg-gray-100 px-1 rounded">.env</code>) with project-specific keys.
-          Useful if team members have their own frontier API accounts.
           Keys are stored in the project settings — only enter keys you're comfortable storing in the database.
         </p>
-        <div className="space-y-3">
+        <div className="space-y-4">
           {[
-            ['anthropic_api_key', 'Anthropic API key', 'sk-ant-...'],
-            ['openai_api_key', 'OpenAI API key', 'sk-...'],
-            ['gemini_api_key', 'Google Gemini API key', 'AI...'],
-          ].map(([field, label, placeholder]) => (
+            { field: 'anthropic_api_key', label: 'Anthropic API key', placeholder: 'sk-ant-…', provider: 'anthropic' },
+            { field: 'openai_api_key',    label: 'OpenAI API key',    placeholder: 'sk-…',     provider: 'openai' },
+            { field: 'gemini_api_key',    label: 'Google Gemini API key', placeholder: 'AI…',  provider: 'google' },
+          ].map(({ field, label, placeholder, provider }) => (
             <div key={field}>
               <label className="label">{label} <span className="text-gray-400 font-normal">(optional override)</span></label>
-              <input
-                type="password"
-                className="input font-mono text-xs"
-                placeholder={placeholder}
-                value={form[field] || ''}
-                onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
-                autoComplete="off"
-              />
+              <div className="flex gap-2 items-center">
+                <input
+                  type="password"
+                  className="input font-mono text-xs flex-1"
+                  placeholder={placeholder}
+                  value={form[field] || ''}
+                  onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
+                  autoComplete="off"
+                />
+                <KeyTestButton provider={provider} keyValue={form[field] || ''} />
+              </div>
             </div>
           ))}
         </div>
+        <div className="mt-4 p-3 bg-amber-50 border border-amber-100 rounded-xl text-xs text-amber-800">
+          <strong>Note:</strong> Claude.ai Pro, ChatGPT Plus, and Gemini Advanced are consumer subscriptions —
+          they don't expose API access. You need the developer API (separate billing).
+        </div>
       </Section>
 
-      {/* Digest mailing list */}
+      {/* ── Digest mailing list ───────────────────────────── */}
       <Section title="Digest Mailing List">
         <div className="flex items-center gap-2 mb-3">
           <Mail size={15} className={status?.email_configured ? 'text-emerald-500' : 'text-gray-300'} />
@@ -355,7 +503,7 @@ ss -tlnp | grep 11434`}
         <textarea
           className="input font-mono text-xs"
           rows={4}
-          placeholder={'alice\nbob\ncharlie'}
+          placeholder={'alice@example.com\nbob@example.com'}
           value={form.digest_recipients}
           onChange={e => setForm(f => ({ ...f, digest_recipients: e.target.value }))}
         />
@@ -365,29 +513,20 @@ ss -tlnp | grep 11434`}
         </p>
       </Section>
 
-      {/* Email ingestion */}
+      {/* ── Email ingestion ───────────────────────────────── */}
       <Section title="Email Ingestion — Submit PDFs & Links by Email">
         <div className="bg-alexandria-50 border border-alexandria-200 rounded-xl p-4 mb-4">
           <p className="text-sm text-alexandria-800 leading-relaxed">
-            <strong>How it works:</strong> Create a dedicated inbox (e.g. <code className="bg-alexandria-100 px-1 rounded">ingest@yourdomain.com</code>
-            {' '}or a Gmail alias). Any team member can email PDFs or paste URLs to that address.
-            Alexandria checks it every 10 minutes, processes attachments and links, and files them into the library.
-            She replies to the sender with a confirmation.
+            <strong>How it works:</strong> Create a dedicated inbox (e.g.{' '}
+            <code className="bg-alexandria-100 px-1 rounded">ingest@yourdomain.com</code>).
+            Any team member can email PDFs or paste URLs to that address.
+            Alexandria checks it every 10 minutes and files them into the library.
           </p>
-        </div>
-
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5 text-xs text-amber-800">
-          <strong>API keys &amp; "Pro" accounts:</strong> Claude.ai Pro, ChatGPT Plus, and Gemini Advanced are
-          consumer subscriptions — they don't expose API access. SciLibrarian uses the developer APIs (Anthropic API,
-          OpenAI API, Google AI API) which have separate billing. To use your own key, enter it in the
-          API Key Overrides section above. Your team can share one key set in <code>.env</code>, or each
-          project can override with its own.
         </div>
 
         <p className="text-xs text-gray-500 mb-4">
           Enable in <code className="bg-gray-100 px-1 rounded">.env</code> — set{' '}
           <code className="bg-gray-100 px-1 rounded">INGEST_EMAIL_ENABLED=true</code> and your IMAP credentials.
-          Works with Gmail, Outlook, Fastmail, or any IMAP provider.
         </p>
 
         <div className="bg-gray-800 rounded-xl p-4 text-xs font-mono text-green-400 space-y-0.5">
@@ -401,12 +540,12 @@ ss -tlnp | grep 11434`}
         </div>
 
         <p className="text-xs text-gray-400 mt-3">
-          <strong>Gmail tip:</strong> Use an App Password (not your regular password) — enable 2FA then generate
-          one at myaccount.google.com/apppasswords. Set INGEST_IMAP_HOST=imap.gmail.com.
+          <strong>Gmail tip:</strong> Use an App Password — enable 2FA then generate one at
+          myaccount.google.com/apppasswords.
         </p>
       </Section>
 
-      {/* Search sources */}
+      {/* ── Search sources ────────────────────────────────── */}
       <Section title="Search Sources">
         <p className="text-xs text-gray-400 mb-3">All sources are free — API keys only improve rate limits.</p>
         <div className="space-y-2">
@@ -414,7 +553,7 @@ ss -tlnp | grep 11434`}
             ['arXiv', true, 'AI/ML preprints — no key needed'],
             ['Semantic Scholar', true, `200M+ papers${status?.search_sources?.semantic_scholar_key ? ' (API key set ✓)' : ' — set SEMANTIC_SCHOLAR_API_KEY for higher rate limit'}`],
             ['OpenAlex', true, `250M+ works${status?.search_sources?.openalex_email ? ' (email set ✓)' : ' — set OPENALEX_EMAIL for polite pool'}`],
-            ['Web (DuckDuckGo)', true, 'Government sites, news, reports — no key needed'],
+            ['Web (Brave/DDG)', true, 'Government sites, news, reports'],
           ].map(([name, ok, note]) => (
             <div key={name} className="flex items-start gap-2 py-1.5 border-b border-gray-50 last:border-0">
               <StatusDot ok={ok} />

@@ -99,6 +99,9 @@ export const reviewApi = {
 export const configApi = {
   status: () => api.get('/config/status'),
   ollamaModels: () => api.get('/config/ollama/models'),
+  testKey: (provider, key = '') => api.post('/config/test-key', { provider, key }),
+  systemStatus: () => api.get('/config/system'),
+  schedulerControl: (action) => api.post(`/config/scheduler/${action}`),
 }
 
 export const librarianApi = {
