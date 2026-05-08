@@ -1,382 +1,381 @@
 ================================================================================
   SCILIBRARIAN — CODEX AGENT CODE REVIEW BRIEFING
-  Prepared by: Claude Sonnet 4.6 (the original author)
-  Date: 2026-05-06
+  Prepared by: Claude Sonnet 4.6
+  Date: 2026-05-08
+  Previous review: claude_agent_notes.txt (2026-05-06)
 ================================================================================
 
-CURRENT GIT STATE (safe revert point)
----------------------------------------
-Repository:  git@github.com:mkuiper/SciLibrarian.git
+CURRENT GIT STATE
+-----------------
 Branch:      main
-HEAD commit: 9d7d95137225fe5a69b9c43618b785ee13d872f4
-Short hash:  9d7d951
+HEAD commit: c82c13b0f15568c47c271e92639edc7a95e288f0
+Total commits: 50
 
-To revert to this state:
-  git fetch origin
-  git reset --hard 9d7d951   # local only
-  # or to restore a working tree after breakage:
-  git checkout 9d7d951 -- .
-
-Commit history summary (37 commits, all on main, 2026-05-04 to 2026-05-06):
-  9d7d951  fix: PDF-aware URL ingestion + reprocess button
-  c1c9e7f  feat: full ingestion on review approve + relevance filtering
-  3ab0741  fix: Boolean import missing in reference model
-  da39af4  fix: collection creation pydantic greenlet bug + starred/notes/read
-  99de133  feat: project deletion, collection scoping fixes
-  db0bd48  fix: Sidebar blank page (declaration order crash)
-  d1dd4ca  feat: project-scoped collections, How It Works page
-  ...  (37 total — see git log --oneline for full history)
+Recent history:
+  c82c13b  docs: update development log, feature status, and design decisions
+  62fc94f  feat: admin config panel — API key health checks + system status
+  ec2c3c7  feat: 8-round review cycle — FTS, dedup, radar, findings, evidence trails
+  b3ce18e  feat: digest overhaul — types, tag focus, date range, delete, PDF fix
+  7e69486  fix: pass BRAVE_SEARCH_API_KEY into backend container
+  dc55569  fix: reliable web search via Brave API + async DDG with retry
+  7fc88d3  fix: reference_id null on tag insert + HuggingFace search improvements
+  1ec1e7d  fix: add HuggingFace source, fix relevance filter for model cards
+  1c902db  feat: project-scoped monitors and review queue
+  dd57a3d  merge: codex review pass + project-scoped references
 
 
 ================================================================================
-  WHAT THIS PROJECT IS
+  STATUS OF YOUR PREVIOUS REVIEW FINDINGS
 ================================================================================
 
-SciLibrarian is an AI-powered knowledge management platform for research teams.
-Its core feature is an AI librarian agent named Alexandria who helps researchers
-ingest, organise, search, and stay current with academic literature.
+Items from claude_agent_notes.txt (2026-05-06), current status:
 
-Primary use case: the Australian AI Safety Institute managing a growing
-library of AI safety papers, policy documents, model cards, and evaluations.
+  DONE ✅  Monitor project_id (item 3) — SearchMonitor.project_id added,
+            ReviewQueueItem.project_id propagated from monitor on creation,
+            approve writes project_id to Reference.
 
-Key user workflows:
-  1. Upload PDFs or paste URLs → Alexandria extracts text, generates summary + tags
-  2. Browse the library by collection (hierarchical folders) or search full text
-  3. Set up monitors (automated searches) → results go to Review Queue → approve
-  4. Ask Alexandria questions in the chat panel → she searches the library + web
-  5. Generate monthly digests → state-of-the-art synthesis of the library
-  6. Watch Requests → plain-language descriptions of what you're looking for
+  DONE ✅  FTS search with ranking and snippets (item 4) — PostgreSQL
+            to_tsvector / plainto_tsquery with GIN index, ts_rank_cd, ts_headline.
+
+  NOT DONE ⬜  Project/collection scoping for list_projects (item 1) — all
+               projects still visible to any authenticated user.
+
+  NOT DONE ⬜  Direct reference endpoint ownership (item 2) — GET/PATCH/DELETE
+               /references/{id} still do not check project membership.
+
+  NOT DONE ⬜  Bulk approve as background job (item 5) — still synchronous HTTP.
+
+  NOT DONE ⬜  Frontend node_modules root-owned (item 6) — Docker build works;
+               local npm build still blocked.
 
 
 ================================================================================
-  TECH STACK
+  WHAT WAS BUILT SINCE YOUR LAST REVIEW (commits ec2c3c7 and 62fc94f)
 ================================================================================
 
-Backend:
-  - Python 3.12, FastAPI 0.115, SQLAlchemy 2.0 (async), asyncpg
-  - PostgreSQL 16 (database, no vector store yet — pgvector column exists but
-    embedding generation not yet wired end-to-end)
-  - LiteLLM 1.56 (unified AI API — Claude, GPT-4o, Gemini, Ollama, vLLM)
-  - For Ollama specifically: bypasses LiteLLM and calls /api/chat directly
-    (reason: LiteLLM's ollama provider can't forward think=false, breaking
-    qwen3/deepseek-r1 streaming — see docs/ollama-integration-investigation.md)
-  - PyMuPDF (PDF text extraction), httpx, BeautifulSoup4, pandas, openpyxl,
-    python-docx (multi-format ingestion)
-  - APScheduler (in-process scheduler: monitors every 6h, digest monthly)
-  - duckduckgo-search, imap-tools, aiosmtplib
+--- Commit ec2c3c7: 8-round improvement cycle ---
+
+Round 1 — PostgreSQL FTS (backend/app/services/search.py, database.py)
+  - Replaced ILIKE scan with to_tsvector / plainto_tsquery
+  - GIN index on concat(title, abstract, summary) added via _MIGRATIONS
+  - ts_rank_cd weighted ranking; ts_headline snippets returned with results
+  - full_text_search() now returns (refs, snippets, total) tuple
+
+Round 2 — Search filter UI (frontend/src/pages/Library.jsx,
+                             frontend/src/components/ReferenceCard.jsx)
+  - year_from / year_to filter params sent server-side
+  - starred, read_status, tag filters all server-side now
+  - FTS snippets displayed in italic when in search mode
+  - 'important' quick-filter added
+
+Round 3 — Ingestion deduplication (backend/app/routers/references.py)
+  - _find_duplicate() checks URL (exact) and normalised title before creating Reference
+  - HTTP 409 returned with existing_id; title check skips empty strings
+  - URL check runs before LLM call (saves API cost); title check runs after
+
+Round 4 — Research Radar (backend/app/routers/projects.py, frontend Dashboard)
+  - GET /projects/{id}/radar: new refs in 7d, recent refs list, trending tags
+    from 30d, pending queue count, active monitor count
+  - Dashboard Radar panel above library breakdown
+
+Round 5 — Enhanced reading states (ReferenceCard.jsx, ReferencePage.jsx)
+  - 'important' added to read_status cycle after 'read'
+  - unread → reading → read → important → unread
+  - No DB migration needed (VARCHAR(20) column accepts new values)
+
+Round 6 — Evidence trails (backend/app/services/librarian.py,
+                            frontend/src/components/LibrarianPanel.jsx)
+  - DEFAULT_SYSTEM_PROMPT instructs Alexandria to append ### Sources section
+  - Frontend parses and strips it; shows clickable reference links below replies
+  - project_id now threaded through chat() → all internal functions
+  - _search_library() upgraded to use FTS with ts_rank_cd
+
+Round 7 — Claim/finding extraction (backend/app/services/ingestion.py,
+                                     frontend/src/pages/ReferencePage.jsx)
+  - generate_metadata prompt extracts main_finding, method, limitations
+  - Stored in extra_metadata.findings (not new columns)
+  - Key Findings card shown on reference detail page when present
+
+Round 8 — Monitor quality metrics (backend/app/models/search_monitor.py,
+                                    backend/app/routers/review.py,
+                                    frontend/src/pages/Monitors.jsx)
+  - approve_count / reject_count added to SearchMonitor model + migrations
+  - decide() endpoint increments counter when item has monitor_id
+  - MonitorCard shows precision % = approve_count / total_decisions
+
+--- Commit 62fc94f: Admin config panel ---
+
+API key health checks (backend/app/routers/config.py, frontend ConfigPage)
+  - POST /config/test-key: takes provider + optional key, makes 1-token call
+  - Returns {ok, model, latency_ms} or categorised error message
+  - Test button inline with each key field; no page refresh
+
+System status panel (GET /config/system)
+  - DB: connected bool, reference_count, pending_queue count
+  - Storage: file count, total MB from uploads directory (os.walk)
+  - Scheduler: running/paused, next_run per job (APScheduler get_jobs())
+
+Scheduler pause/resume (POST /config/scheduler/{pause|resume})
+  - Calls APScheduler .pause() / .resume() in-process
+  - Useful when bulk-importing to suppress monitor competition
+
+
+================================================================================
+  NEW FILES CHANGED — WHERE TO FOCUS
+================================================================================
+
+Backend (high priority):
+  backend/app/services/search.py        — FTS rewrite; most logic-dense new code
+  backend/app/routers/config.py         — 3 new endpoints; test-key does external
+                                          API calls; system endpoint does DB query
+                                          + filesystem walk + scheduler introspection
+  backend/app/routers/references.py     — _find_duplicate() + dedup logic
+  backend/app/routers/review.py         — monitor stat increment on decide()
+  backend/app/routers/projects.py       — radar endpoint; 5 new imports inside fn
+  backend/app/services/ingestion.py     — prompt change + findings post-processing
+  backend/app/services/librarian.py     — project_id threading through 5 functions;
+                                          _search_library FTS upgrade
+
+Backend (lower priority):
+  backend/app/models/search_monitor.py  — two new Integer columns
+  backend/app/schemas/search_monitor.py — precision @property on Pydantic model
+  backend/app/database.py               — 3 new migration strings
 
 Frontend:
-  - React 18, Vite 6, Tailwind CSS 3
-  - TanStack Query v5 (server state), React Router v6, Axios
-  - Lucide icons, react-hot-toast, react-markdown
-
-Infrastructure:
-  - Docker Compose (db, backend, frontend, optional ollama via --profile ollama)
-  - Ollama service mounts host model directory /usr/share/ollama/.ollama
-    (avoids re-downloading models; 13 models including gemma4, qwen3.5, medgemma)
-  - GPU passthrough: NVIDIA Container Toolkit, deploy.resources in compose
-  - Default model: ollama/gemma4:latest (RTX 5090 available on dev machine)
+  frontend/src/pages/ConfigPage.jsx     — largest change; two new sections
+  frontend/src/pages/Library.jsx        — rewrite; server-side filters
+  frontend/src/components/ReferenceCard.jsx — snippet prop; new read states
+  frontend/src/pages/Dashboard.jsx      — radar panel
+  frontend/src/components/LibrarianPanel.jsx — evidence trail parsing
 
 
 ================================================================================
-  PROJECT STRUCTURE
+  POTENTIAL ISSUES TO INVESTIGATE
 ================================================================================
 
-SciLibrarian/
-├── backend/
-│   ├── app/
-│   │   ├── main.py              FastAPI app, lifespan (init_db + scheduler)
-│   │   ├── config.py            Pydantic settings (all env vars)
-│   │   ├── database.py          SQLAlchemy engine + init_db() + _MIGRATIONS list
-│   │   ├── dependencies.py      CurrentUser, DB annotated types
-│   │   ├── models/
-│   │   │   ├── user.py          User (username/password, no email)
-│   │   │   ├── project.py       Project, Digest, WatchRequest
-│   │   │   ├── collection.py    Collection (hierarchical, project-scoped)
-│   │   │   ├── reference.py     Reference, ReferenceTag (is_starred, read_status, notes)
-│   │   │   ├── review_queue.py  ReviewQueueItem (monitor discoveries)
-│   │   │   └── search_monitor.py SearchMonitor
-│   │   ├── routers/
-│   │   │   ├── auth.py          register/login/me (username-based, no email)
-│   │   │   ├── references.py    CRUD + upload/bulk/zip/reprocess + bibtex/file serve
-│   │   │   ├── collections.py   CRUD + tree endpoint (project-filtered)
-│   │   │   ├── projects.py      CRUD + digests + watch-requests + settings
-│   │   │   ├── librarian.py     /chat (streaming) + /models (live Ollama detection)
-│   │   │   ├── review.py        Queue + decide (full ingest) + monitors CRUD
-│   │   │   ├── search.py        Full-text search
-│   │   │   └── config.py        /status + /ollama/models
-│   │   └── services/
-│   │       ├── llm.py           Unified LLM: LiteLLM for cloud, direct API for Ollama
-│   │       ├── librarian.py     Alexandria agent (tool use: search/web/arxiv/fulltext)
-│   │       ├── ingestion.py     PDF+URL ingestion (PDF-aware URL routing)
-│   │       ├── extractors.py    Multi-format: CSV, Excel, PDB, FASTA, DOCX, etc.
-│   │       ├── proactive_search.py arXiv/SemanticScholar/OpenAlex/DuckDuckGo +
-│   │       │                    Alexandria relevance filtering + query expansion
-│   │       ├── digest.py        Monthly digest generation (project or collection scope)
-│   │       ├── project_setup.py Project onboarding (Alexandria designs collection taxonomy)
-│   │       ├── scheduler.py     APScheduler jobs (monitors, digest, email ingest)
-│   │       ├── email_ingest.py  IMAP polling for emailed PDFs/URLs
-│   │       ├── email_service.py SMTP digest delivery
-│   │       ├── embeddings.py    pgvector infrastructure (NOT YET WIRED — skeleton only)
-│   │       └── search.py        PostgreSQL full-text search
-│   ├── cli/main.py              Typer CLI (login, ingest, ingest-dir, ingest-urls, search, digest)
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx              Routes
-│   │   ├── api/client.js        Axios + all API methods (uses /api Vite proxy)
-│   │   ├── hooks/useProject.js  Active project hook (localStorage + projects query)
-│   │   ├── store/auth.jsx       AuthContext (user, login, logout)
-│   │   ├── components/
-│   │   │   ├── Sidebar.jsx      Navigation + collection tree + project switcher
-│   │   │   ├── Layout.jsx       Shell (sidebar + main + floating chat button)
-│   │   │   ├── LibrarianPanel.jsx Alexandria chat (streaming, model picker)
-│   │   │   ├── ReferenceCard.jsx Card with star/read toggle (optimistic updates)
-│   │   │   ├── CollectionTree.jsx Recursive tree for sidebar
-│   │   │   └── AddReferenceModal.jsx 4-tab modal: file/batch/URL/bulk URLs
-│   │   └── pages/
-│   │       ├── Dashboard.jsx    Stats, recent refs, queue preview
-│   │       ├── Library.jsx      Reference list + search + starred/unread filters
-│   │       ├── ReferencePage.jsx Detail + inline editing + PDF viewer + reprocess
-│   │       ├── CollectionsPage.jsx Tree editor (rename/add/delete inline)
-│   │       ├── ReviewQueue.jsx  Queue with full-ingest toggle
-│   │       ├── Monitors.jsx     CRUD + run-now
-│   │       ├── WatchRequests.jsx Natural-language interests (auto-creates monitor)
-│   │       ├── DigestPage.jsx   Generate + view digests (project or collection scope)
-│   │       ├── ConfigPage.jsx   Provider status + Ollama detection + model assignment
-│   │       ├── ProjectSetup.jsx Onboarding flow (Alexandria designs structure)
-│   │       ├── TagBrowser.jsx   Tag cloud + browse refs by tag
-│   │       ├── RestructurePage.jsx Alexandria restructure suggestions
-│   │       └── HowItWorks.jsx   Explainer page
-├── docs/
-│   ├── design-decisions.md      Architectural rationale (14+ decisions documented)
-│   ├── development-log.md       Per-cycle build log (Cycles 1-7)
-│   └── ollama-integration-investigation.md  Deep-dive on Ollama issues + fixes
-├── docker-compose.yml           Dev stack (db, backend, frontend, optional ollama)
-├── docker-compose.prod.yml      Production (nginx, 2 uvicorn workers)
-├── nginx/nginx.conf             Reverse proxy config (SSL, streaming support)
-├── .env.example                 All env vars documented
-├── CLAUDE.md                    Claude Code context file
-└── README.md                    Full user-facing documentation
+1. FTS fallback on stopword-only queries
+   plainto_tsquery('english', 'the a is') returns an empty tsquery which matches
+   nothing. The current code returns an empty result set rather than falling back
+   to a full list. Whether this is correct depends on UX intent.
+   File: backend/app/services/search.py
+
+2. _find_duplicate() empty-title edge case
+   The function skips the title check when norm_title is empty, but the URL check
+   still runs. A call with url=None and title="" returns None safely. Verify
+   the from-url endpoint doesn't trigger a false 409 when a URL normalises to ""
+   or when the URL dedup check fires before meta_title is known.
+   File: backend/app/routers/references.py (lines around the two dedup calls)
+
+3. test-key endpoint: key stored in request body, not header
+   The API key is POSTed as a JSON body field. It will appear in backend access
+   logs (request body is not typically logged by uvicorn, but is by some
+   middleware). Verify no logging middleware captures it.
+   File: backend/app/routers/config.py (KeyTestRequest)
+
+4. Scheduler state detection uses magic integer constant
+   scheduler_info["paused"] = sched.state == 2 relies on APScheduler's internal
+   STATE_PAUSED = 2. This is not a public constant. Should use
+   apscheduler.schedulers.base.STATE_PAUSED or check the import.
+   File: backend/app/routers/config.py (~line 195)
+
+5. Precision @property on Pydantic model
+   SearchMonitorOut has a precision @property. Pydantic v2 does not serialise
+   @property attributes — it will not appear in JSON responses unless explicitly
+   included as a computed_field. The Monitors page calculates precision from
+   approve_count and reject_count directly in JSX, so this is not currently
+   broken, but the @property is dead code and may mislead future callers.
+   File: backend/app/schemas/search_monitor.py
+
+6. Monitor stat increment: no transaction isolation
+   In review.py decide(), the monitor is fetched, incremented, and flushed in
+   the same transaction as the queue item status update. If two concurrent
+   approvals from the same monitor arrive simultaneously, both could read
+   approve_count=5 and both write approve_count=6 (lost update). For low-
+   concurrency internal use this is acceptable, but worth noting.
+   File: backend/app/routers/review.py
+
+7. Radar endpoint: inline imports inside function body
+   project_radar() does `from app.models... import ...` and
+   `from datetime import datetime, timezone` inside the function. These are
+   deferred imports that work correctly but are inconsistent with the rest of
+   the codebase (top-level imports). Minor style issue.
+   File: backend/app/routers/projects.py
+
+8. _dir_stats() blocks the event loop
+   The os.walk call in config.py is synchronous and will block the async event
+   loop for large upload directories. For small libraries this is fine; for
+   large ones it could cause noticeable latency on the /config/system request.
+   Fix: run in a thread pool via asyncio.to_thread().
+   File: backend/app/routers/config.py (_dir_stats function)
+
+9. Evidence trail parsing: model may omit or misformat Sources section
+   The frontend parseSourcesFromResponse() uses lastIndexOf('\n### Sources\n').
+   If the model writes "### Sources" without a blank line before it, or writes
+   it mid-response rather than at the end, parsing silently returns no sources.
+   This is cosmetic (no functionality broken) but could confuse users who see
+   an answer with citations but no Sources panel.
+   File: frontend/src/components/LibrarianPanel.jsx
+
+10. Library.jsx: 'important' filter sends read_status=important but also has
+    a separate filterUnread toggle sending read_status=unread. The two are
+    mutually exclusive in the UI (filterImportant overrides filterUnread in
+    the ternary), but the filterUnread state is not cleared when filterImportant
+    is set. Cosmetically inconsistent.
+    File: frontend/src/pages/Library.jsx
 
 
 ================================================================================
-  DATABASE SCHEMA (key points)
+  KNOWN PERSISTENT ISSUES (carried from previous review)
+================================================================================
+
+A. Direct reference endpoint ownership still not enforced.
+   GET/PATCH/DELETE /references/{id} fetch by id only; any authenticated user
+   can read or modify any reference. The project_id and created_by fields exist
+   but are not checked. This remains the highest-priority security gap.
+
+B. list_projects returns all projects for all authenticated users.
+   No team/membership model exists yet.
+
+C. Bulk approve is synchronous HTTP. A 20-item queue with full ingest takes
+   5-10 minutes. Should become a background job.
+
+D. Scheduler runs in-process. With uvicorn --workers 2 (production docker-compose)
+   both workers run a scheduler, causing duplicate monitor/digest runs.
+
+E. API keys stored in plain text in project.settings JSON column.
+
+
+================================================================================
+  DATABASE SCHEMA (updated for this review)
 ================================================================================
 
 Tables: users, projects, collections, references, reference_tags,
         review_queue, search_monitors, digests, watch_requests
 
-Schema management: NO Alembic. Uses SQLAlchemy create_all() + a _MIGRATIONS
-list in database.py that runs ALTER TABLE IF NOT EXISTS on startup.
-This is intentional (simple, self-healing) but means no migration history.
+New since last review:
+  search_monitors: + approve_count INTEGER NOT NULL DEFAULT 0
+                   + reject_count  INTEGER NOT NULL DEFAULT 0
+  (references table): + GIN index ix_references_fts on FTS expression
+                       (not a column — a functional index)
 
-Key design choices:
-  - 'references' is a reserved SQL word — must be double-quoted everywhere
-  - projects → collections → references (hierarchical, all project-scoped)
-  - All collections require project_id (added via migration, nullable)
-  - CollectionOut MUST be built with _col_to_out() — NOT model_validate()
-    because model_validate tries to access lazy SQLAlchemy relationships
-    and crashes with MissingGreenlet error in async context
-  - References have: is_starred (bool), read_status (unread/reading/read),
-    notes (text), full_text (text), file_path (local storage only)
+Schema management: still no Alembic. _MIGRATIONS in database.py, runs at startup
+with IF NOT EXISTS guards. Now 13 entries.
 
-Auth: JWT, username+password only (no email required by design).
-      Tokens stored in localStorage (frontend).
-
-
-================================================================================
-  KNOWN ISSUES AND ROUGH EDGES
-================================================================================
-
-1. NO ALEMBIC — schema changes are manual ALTER TABLE statements in database.py
-   _MIGRATIONS list. This is fragile and doesn't track history. A proper
-   Alembic setup is a recommended improvement.
-
-2. EMBEDDINGS NOT WIRED — services/embeddings.py exists and pgvector dependency
-   is installed, but the Reference model has no embedding column yet and
-   get_embedding()/similarity_search() are never called. The infrastructure
-   is there; the migration and wiring are TODO.
-
-3. COLLECTION SCOPING INCOMPLETE — references have project_id but the list/search
-   endpoints don't always filter by current project. A user can see references
-   from other projects if they know the API directly.
-
-4. NO RATE LIMITING — the API has no rate limiting middleware. Any authenticated
-   user can hammer the LLM endpoints.
-
-5. API KEYS STORED IN DB — per-project API key overrides (Anthropic/OpenAI/Gemini)
-   are stored in plain text in project.settings JSON. Acceptable for internal
-   tool, not for multi-tenant SaaS.
-
-6. SCHEDULER RUNS IN-PROCESS — APScheduler runs inside the uvicorn process.
-   With --workers 2 (production), each worker would run its own scheduler,
-   causing duplicate monitor runs. Production should use a single worker or
-   an external task queue (Celery/ARQ).
-
-7. UPLOADS ON LOCAL FILESYSTEM — PDFs stored at /app/uploads (Docker volume).
-   Production should move to S3/GCS. The file_path column stores absolute
-   container paths which will break if the volume moves.
-
-8. FULL TEXT TRUNCATED AT 50,000 CHARS — long PDFs are cut. The truncation
-   happens in extract_pdf_text() and is intentional (LLM context limits) but
-   means the search index and librarian don't see the full paper.
-
-9. CORS IS WIDE OPEN IN DEVELOPMENT — allow_origins=["*"] in development mode.
-   Tighten for production (update main.py CORS config).
-
-10. FRONTEND USES LOCALSTORAGE FOR AUTH TOKEN — standard approach but vulnerable
-    to XSS. HttpOnly cookies would be more secure.
-
-11. useProject() HOOK RE-FETCHES PROJECTS INDEPENDENTLY — multiple components
-    call useProject() which all issue a GET /projects query. TanStack Query
-    caches these (same queryKey), so it's not N requests, but the hook is
-    used in Sidebar AND individual pages, creating mild coupling.
-
-12. CollectionOut HAS children FIELD — this field is only populated by the
-    /tree endpoint. The flat /collections endpoint returns children=[] always.
-    This is technically correct but confusing schema design.
-
-13. REVIEW QUEUE FULL INGEST IS SLOW — each approved URL item runs the full
-    ingestion pipeline (15-30s). Bulk approve with full ingest on 20 items
-    will take 5-10 minutes and hold the HTTP connection. Should be a
-    background job with progress streaming.
+Key quirks (unchanged):
+  - 'references' is a reserved SQL word — double-quoted everywhere in raw SQL
+  - CollectionOut must use _col_to_out() helper, not model_validate() — async
+    greenlet issue with lazy relationship loading
+  - extra_metadata JSON column stores: provider-specific fields, doi, arxiv_id,
+    openalex_id, AND now extra_metadata.findings = {main_finding, method, limitations}
 
 
 ================================================================================
-  AREAS TO FOCUS REVIEW ON
+  HOW TO RUN
 ================================================================================
 
-Priority 1 (correctness + reliability):
-  - backend/app/routers/references.py: route ordering (/stats/summary must
-    appear before /{ref_id} to prevent "stats" being parsed as int)
-  - backend/app/services/llm.py: Ollama direct API path — error handling,
-    timeout behaviour, what happens when Ollama is slow/unavailable
-  - backend/app/services/ingestion.py: the new PDF-aware URL routing —
-    edge cases (redirects, auth-gated PDFs, non-standard content-types)
-  - backend/app/database.py: _MIGRATIONS running at every startup is safe
-    (IF NOT EXISTS) but any error in a migration is silently swallowed
+git clone git@github.com:mkuiper/SciLibrarian.git
+cd SciLibrarian
+cp .env.example .env
+# Add ANTHROPIC_API_KEY for cloud models, or leave blank for Ollama only
+docker-compose --profile ollama up --build
 
-Priority 2 (security):
-  - auth.py: JWT handling, token expiry, no refresh tokens
-  - dependencies.py: current_user extraction
-  - Any SQL injection vectors (SQLAlchemy ORM should prevent but verify)
-  - File upload handling in references.py (path traversal, MIME spoofing)
+Frontend: http://localhost:5173
+API docs: http://localhost:8000/docs
+Register at /register (username + password, no email required)
 
-Priority 3 (performance):
-  - Collections tree endpoint: loads all children recursively with N+1 queries
-    (one query per node). For deep/wide trees this degrades. A CTE-based
-    recursive query would fix this.
-  - proactive_search.py: Alexandria relevance filter adds one LLM call per
-    monitor run. With slow Ollama models this could time out.
-  - Library page: fetches up to 200 references client-side then filters.
-    Should be server-side pagination + filtering.
+Useful diagnostic commands:
 
-Priority 4 (code quality):
-  - Error handling consistency: some routers catch all exceptions silently,
-    others propagate. A global exception handler would help.
-  - Type hints: backend is mostly typed but some services have Optional without
-    proper None checks
-  - Frontend: no TypeScript (plain JSX). Some components are getting large
-    (AddReferenceModal.jsx, ReferencePage.jsx) and could be split.
+  # Syntax-check all backend Python
+  python3 -c "
+  import ast, os, sys
+  errors = []
+  for root, dirs, files in os.walk('backend/app'):
+      dirs[:] = [d for d in dirs if d != '__pycache__']
+      for f in files:
+          if f.endswith('.py'):
+              p = os.path.join(root, f)
+              try: ast.parse(open(p).read())
+              except SyntaxError as e: errors.append(f'{p}: {e}')
+  print('OK' if not errors else '\n'.join(errors)); sys.exit(len(errors))
+  "
 
+  # Check DB via backend container
+  docker exec scilibraian-backend-1 python3 -c "
+  import asyncio
+  from app.database import AsyncSessionLocal
+  from sqlalchemy import text
+  async def q(sql):
+      async with AsyncSessionLocal() as db:
+          r = await db.execute(text(sql))
+          for row in r: print(row)
+  asyncio.run(q('SELECT count(*) FROM \"references\"'))
+  asyncio.run(q('SELECT id, name, approve_count, reject_count FROM search_monitors'))
+  "
 
-================================================================================
-  HOW TO RUN (for testing during review)
-================================================================================
+  # Test the FTS search endpoint
+  curl -s 'http://localhost:8000/search?q=alignment+interpretability&project_id=1' \
+    -H "Authorization: Bearer $TOKEN" | python3 -m json.tool | head -50
 
-Prerequisites: Docker, Docker Compose, NVIDIA Container Toolkit (for GPU)
+  # Test key health check
+  curl -s -X POST http://localhost:8000/config/test-key \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"provider":"anthropic","key":""}' | python3 -m json.tool
 
-Quick start:
-  git clone git@github.com:mkuiper/SciLibrarian.git
-  cd SciLibrarian
-  cp .env.example .env
-  # Edit .env: add ANTHROPIC_API_KEY or leave empty to use Ollama only
-  docker-compose --profile ollama up --build
-  # Frontend: http://localhost:5173
-  # API docs: http://localhost:8000/docs
-
-With Ollama (host models already downloaded at /usr/share/ollama/.ollama):
-  OLLAMA_BASE_URL=http://ollama:11434 (default in .env)
-  The ollama service mounts /usr/share/ollama/.ollama for instant model access
-
-Without Ollama (cloud API only):
-  docker-compose up --build
-  Set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env
-
-Register at http://localhost:5173/register (no email needed, just username+password)
-Create a project — Alexandria will design your collection structure using the
-configured model.
-
-Run tests manually:
-  Backend API: http://localhost:8000/docs (Swagger UI)
-  Health check: curl http://localhost:8000/health
+  # System status
+  curl -s http://localhost:8000/config/system \
+    -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
 
 
 ================================================================================
-  DESIGN PHILOSOPHY (why things are the way they are)
+  SUGGESTED FOCUS FOR THIS REVIEW PASS
 ================================================================================
 
-Full rationale in docs/design-decisions.md. Key points:
+In rough priority order:
 
-- Bypass LiteLLM for Ollama: LiteLLM's ollama provider can't pass think=false,
-  causing streaming failures on qwen3/deepseek-r1 models. Direct /api/chat works.
+1. Verify the FTS search service (search.py): check that the SQLAlchemy
+   expressions generate correct PostgreSQL SQL, that the GIN index migration
+   string matches the query expression, and that the empty-query (list mode)
+   path is correct.
 
-- No Alembic: chosen for simplicity (ALTER TABLE IF NOT EXISTS is idempotent).
-  Tech debt that should be addressed before any team collaboration on schema.
+2. Review the deduplication logic in references.py: _find_duplicate() for
+   edge cases; the two-stage dedup on from-url (before and after ingest).
 
-- No email required for auth: privacy decision. Username+password only.
+3. Check config.py for the three new endpoints: test-key (external API call
+   from a GET endpoint — timeout handling?), system status (_dir_stats blocking
+   the event loop), scheduler state detection (magic constant issue #4 above).
 
-- Human review queue: all monitor discoveries require approval before entering
-  the library. Quality over volume — automated ingestion without review erodes
-  trust in the library.
+4. Assess the monitor stat increment in review.py for the lost-update race
+   noted in issue #6 above.
 
-- Multi-provider via LiteLLM: allows the same codebase to work with Claude
-  (cloud), GPT-4o (cloud), Gemini (cloud), or fully local Ollama models.
-  Default is ollama/gemma4:latest since the dev machine has an RTX 5090.
+5. Flag the @property on SearchMonitorOut (issue #5) — dead code or misused.
 
-- PDF-aware URL ingestion: arXiv URLs from monitors point to abstract pages or
-  PDFs. The ingestion layer auto-detects and routes to the correct pipeline.
-  History: this was a bug for several days — references from monitors had
-  0 text until this was fixed.
+6. Address persistent security gap A (reference endpoint ownership) if scope
+   permits. This has been open since the first review pass and is the highest-
+   impact correctness issue.
 
 
 ================================================================================
-  USEFUL COMMANDS FOR THE REVIEWING AGENT
+  DESIGN DECISIONS (for context on choices made)
 ================================================================================
 
-# Check what's actually in the DB
-docker exec scilibraian-backend-1 python3 -c "
-import asyncio
-from app.database import AsyncSessionLocal
-from sqlalchemy import text
-async def q(sql):
-    async with AsyncSessionLocal() as db:
-        r = await db.execute(text(sql))
-        for row in r: print(row)
-asyncio.run(q('SELECT id, title, length(full_text), length(summary) FROM \"references\" ORDER BY id DESC LIMIT 10'))
-"
+Full rationale in docs/design-decisions.md. Key decisions relevant to new code:
 
-# Watch backend logs live
-docker logs scilibraian-backend-1 -f 2>&1
+- FTS over ILIKE: plainto_tsquery chosen over to_tsquery for robustness (handles
+  multi-word phrases, ignores stopwords). The GIN index expression must match
+  the query expression exactly for the index to be used.
 
-# Run a quick API test (replace TOKEN)
-TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"mike","password":"YOUR_PASSWORD"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
-curl -s http://localhost:8000/projects -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+- Findings in extra_metadata.findings: not new columns. Allows schema evolution
+  without migration cost. The fields (main_finding, method, limitations) may
+  expand in future cycles.
 
-# Check Ollama connectivity from backend container
-docker exec scilibraian-backend-1 python3 -c "
-import asyncio, httpx
-async def t():
-    async with httpx.AsyncClient(timeout=3) as c:
-        r = await c.get('http://ollama:11434/api/tags')
-        import json; models = json.loads(r.text)['models']
-        print(f'{len(models)} models available')
-        for m in models: print(f'  {m[\"name\"]}')
-asyncio.run(t())
-"
+- Evidence trails via model self-reporting (### Sources section): simpler than
+  structured streaming metadata at the cost of reliability. Model may omit or
+  misformat. Documented limitation.
+
+- Dedup returns 409 with existing_id: allows frontend to redirect rather than
+  silently swallow the error. Project-scoped so same paper can exist in two
+  projects.
 
 ================================================================================
   END OF NOTES
