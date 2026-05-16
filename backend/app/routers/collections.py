@@ -1,6 +1,7 @@
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 
 from app.dependencies import DB, CurrentUser
 from app.models.collection import Collection
@@ -141,3 +142,25 @@ async def delete_collection(collection_id: int, db: DB, current_user: CurrentUse
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
     await db.delete(col)
+
+
+@router.get("/{collection_id}/bibtex")
+async def export_collection_bibtex(collection_id: int, db: DB, current_user: CurrentUser):
+    from app.routers.references import _to_bibtex
+
+    col = (await db.execute(select(Collection).where(Collection.id == collection_id))).scalar_one_or_none()
+    if not col:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    refs = (await db.execute(
+        select(Reference)
+        .options(selectinload(Reference.tags))
+        .where(Reference.collection_id == collection_id)
+    )).scalars().all()
+
+    body = "\n\n".join(_to_bibtex(ref) for ref in refs)
+    return Response(
+        content=body,
+        media_type="text/x-bibtex; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="collection_{collection_id}.bib"'},
+    )

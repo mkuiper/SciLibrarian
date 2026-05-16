@@ -1,11 +1,13 @@
 from typing import Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.dependencies import DB, CurrentUser
 from app.models.project import Project, Digest, WatchRequest
 from app.models.collection import Collection
+from app.models.reference import Reference
 from app.schemas.project import (
     ProjectCreate, ProjectUpdate, ProjectOut,
     DigestCreate, DigestOut,
@@ -384,3 +386,25 @@ async def update_project_settings(
     await db.flush()
     await db.refresh(project)
     return project
+
+
+@router.get("/{project_id}/bibtex")
+async def export_project_bibtex(project_id: int, db: DB, current_user: CurrentUser):
+    from app.routers.references import _to_bibtex
+
+    project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    refs = (await db.execute(
+        select(Reference)
+        .options(selectinload(Reference.tags))
+        .where(Reference.project_id == project_id)
+    )).scalars().all()
+
+    body = "\n\n".join(_to_bibtex(ref) for ref in refs)
+    return Response(
+        content=body,
+        media_type="text/x-bibtex; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="project_{project_id}.bib"'},
+    )
