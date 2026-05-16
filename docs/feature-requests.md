@@ -222,13 +222,14 @@ semantics. Until then, backend scoping should be conservative and clear.
 - ✅ project_id threaded through librarian chat so library search is project-scoped
 - ⬜ Enforce project access on direct reference endpoints (GET/PATCH/DELETE /{id}) — still open
 
-### Phase 2: Retrieval Quality — ✅ Largely Complete
+### Phase 2: Retrieval Quality — ✅ Complete
 
 - ✅ PostgreSQL FTS with `to_tsvector` / `plainto_tsquery`, GIN index, weighted ranking, `ts_headline` snippets
+- ✅ Quote search: FTS index extended to cover `full_text` with weighted `setweight` (title A → full_text D); `ts_headline` scans the body so the matching passage surfaces in snippets (Cycle 11)
 - ✅ Server-side filters: year range, tag, source type, read status, starred
 - ✅ Deduplication at ingestion: URL and normalised title checks, 409 with existing_id on duplicate
 - ✅ DOI / arXiv ID as indexed columns for stronger dedup (Cycle 10) — extracted from URLs, source adapters, and LLM-generated metadata; checked at reference create, bulk paths, and monitor queue intake
-- ⬜ Server-side pagination in the Library list view (currently fetches up to 200)
+- ✅ Server-side Library pagination via `X-Total-Count` header, prev/next controls, 50 per page (Cycle 11)
 
 ### Phase 3: Research Synthesis — ✅ Largely Complete
 
@@ -270,8 +271,10 @@ The most impactful remaining work, in priority order:
 
 1. **Project access enforcement** on direct reference endpoints (security gap noted by Codex review)
 2. ~~**DOI / arXiv ID deduplication**~~ — ✅ shipped in Cycle 10
-3. **Server-side Library pagination** — current 200-ref cap will become a problem as libraries grow
-4. **Full-text quote search** — extend FTS GIN index to cover `extracted_text` so "where did I read X" works
-5. **Cross-reference comparison view** — UI to compare findings/method/limitations across 2-4 selected refs
+3. ~~**Server-side Library pagination**~~ — ✅ shipped in Cycle 11
+4. ~~**Full-text quote search**~~ — ✅ shipped in Cycle 11
+5. ~~**Cross-reference comparison view**~~ — ✅ shipped in Cycle 11
 6. **Monitor learning from review decisions** — summarise why recent rejections were off-target, suggest query refinements
 7. **Project membership and roles** — prerequisite for all team workflow features
+8. **Citation graph via Semantic Scholar** — cited-by / cites navigation across the library
+9. **Living literature review** — generated synthesis per project / collection that updates as papers arrive

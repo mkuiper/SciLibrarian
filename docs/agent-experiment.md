@@ -105,3 +105,50 @@ Time accounting (rough):
 - Diff review: ~3 min
 - Cleanup edits: ~5 min
 - Total: ~13 min — vs. probably ~10 min if I'd just written it myself. Break-even on this task. The win comes if you can run several such tasks in parallel.
+
+---
+
+## Experiment 2 — Critical review of Cycle 11 diff
+
+**Date:** 2026-05-16
+**Delegated to:** Gemini CLI 0.42.0 (review of uncommitted diff)
+**Working tree:** Cycle 11 changes — quote search, pagination, compare view
+
+### Why this delegation
+
+The user asked specifically about using frontier-lab agents for critical review. First attempt was **Codex CLI's `codex review --uncommitted`** subcommand — purpose-built for this and offered structured findings JSON. However Codex's Linux sandbox (bubblewrap) failed in this environment (`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`) even with `--dangerously-bypass-approvals-and-sandbox`, and Codex refused to inspect the diff at all. Codex review would have been ideal here if the sandbox worked.
+
+Fell back to **piping the diff to Gemini** with a focused review prompt covering: FTS migration safety, ORM/migration alignment, count/data drift, click-target edge cases, URL-param injection, batch-endpoint DoS/security.
+
+### Findings Gemini reported
+
+| # | Finding | Verdict |
+|---|---------|---------|
+| 1 | IDOR on `GET /references/batch` — no project / ownership scope, any auth user can read any ref by ID | **TRUE.** Matches the known pre-existing gap on `/{id}` endpoints. New endpoint shouldn't widen the surface. |
+| 2 | "Search mode will fail to paginate — services/search.py wasn't updated for limit/offset/COUNT" | **FALSE.** `full_text_search` already accepted limit/offset and returned total before the diff; the diff only touched the FTS index/query expression. Gemini missed that the function signature was untouched. |
+| 3 | `ALTER TABLE ADD COLUMN ... GENERATED ALWAYS AS ... STORED` rewrites the table under `AccessExclusiveLock` | **TRUE but acceptable.** Brief at our scale (hundreds → low thousands of refs), would be a real issue at 10M+ rows. Worth noting in design-decisions. |
+| 4 | SQLAlchemy `Computed(persisted=True)` correctly matches `STORED`, omits column from INSERT/UPDATE | **CONFIRMED.** Validation, not a finding. |
+| 5 | Compare UI event handling sound — checkbox `stopPropagation`, `handleCardClick` doesn't double-fire | **CONFIRMED.** Validation. |
+| 6 | `/batch` endpoint preserves order via dict + list-comprehension reordering; URL-length DoS isn't a concern | **CONFIRMED.** Validation. |
+
+### Actions taken in response
+
+- **Finding 1 (IDOR):** Added optional `project_id` query parameter to `/references/batch`. ComparePage now reads the active project from `useProject()` and passes it. This brings `/batch` in line with the `GET /references` list-endpoint pattern (`project_id` as a filter). The deeper fix — actual ownership enforcement on every direct reference endpoint — is still the standing security gap, but the new endpoint at least doesn't widen it.
+- **Finding 2 (false positive):** Verified by reading `services/search.py` — limit/offset/total were already in place. No action.
+- **Finding 3 (lock):** Acceptable at this scale; not changing the migration. Already noted in the Cycle 11 design-decisions entry about the `STORED` storage trade-off. Adding a margin note for future scale.
+
+### Verdict on Gemini-as-reviewer
+
+**Worth doing.** Caught a real issue (IDOR) and gave one false positive that took 30 seconds to verify. Compared with not having the review: I would likely have shipped `/batch` without project-scoping, perpetuating the pattern. Compared with `codex review` (didn't work here due to sandbox), Gemini's freeform prose is harder to parse than Codex's structured findings JSON would have been — but freeform was enough.
+
+Gotchas observed:
+- The Gemini CLI emitted a long bundled stack trace about `NumericalClassifierStrategy` failing to route — looked alarming but the actual review output came through fine after it. The error is in Gemini's model-routing telemetry, not the response.
+- Gemini's confidence on the false positive (#2) was high. Always verify claims against the actual code before acting on them.
+
+Time accounting:
+- Codex sandbox debugging: ~3 min (wasted)
+- Diff capture + Gemini prompt: ~1 min
+- Gemini response: ~20 s
+- Verifying findings: ~3 min
+- Applying real fix (IDOR): ~3 min
+- Total: ~10 min for one real catch worth multiples of that.

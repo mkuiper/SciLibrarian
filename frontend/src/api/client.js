@@ -57,6 +57,9 @@ export const collectionsApi = {
 
 export const referencesApi = {
   list: (params) => api.get('/references', { params }),
+  batch: (ids, projectId) => api.get('/references/batch', {
+    params: { ids: ids.join(','), ...(projectId ? { project_id: projectId } : {}) },
+  }),
   get: (id) => api.get(`/references/${id}`),
   stats: (params) => api.get('/references/stats/summary', { params }),
   uploadPdf: (formData) => api.post('/references/upload', formData, {

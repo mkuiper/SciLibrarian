@@ -31,7 +31,7 @@ const STATUS_BADGE = {
   flagged:   'badge bg-red-50 text-red-600 text-xs',
 }
 
-export default function ReferenceCard({ reference: r, showControls = true, snippet }) {
+export default function ReferenceCard({ reference: r, showControls = true, snippet, selectable = false, selected = false, onToggleSelect }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [optimisticStarred, setOptimisticStarred] = useState(null)
@@ -71,15 +71,33 @@ export default function ReferenceCard({ reference: r, showControls = true, snipp
   // Show snippet (from FTS) if provided, otherwise show summary
   const bodyText = snippet || r.summary
 
+  const handleCardClick = () => {
+    if (selectable && onToggleSelect) {
+      onToggleSelect(r.id)
+    } else {
+      navigate(`/references/${r.id}`)
+    }
+  }
+
   return (
     <div
       className={clsx(
         'card p-4 hover:shadow-md transition-all cursor-pointer group',
-        readStatus === 'read' && 'opacity-70',
+        readStatus === 'read' && !selected && 'opacity-70',
+        selected && 'ring-2 ring-alexandria-400 bg-alexandria-50/30',
       )}
-      onClick={() => navigate(`/references/${r.id}`)}
+      onClick={handleCardClick}
     >
       <div className="flex items-start gap-3">
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect?.(r.id)}
+            onClick={(e) => e.stopPropagation()}
+            className="mt-1 accent-alexandria-500 shrink-0"
+          />
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1.5">
             <span className={clsx('badge text-xs', config.color)}>

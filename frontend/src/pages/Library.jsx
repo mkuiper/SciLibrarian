@@ -1,12 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { referencesApi, collectionsApi, searchApi } from '../api/client'
 import { useProject } from '../hooks/useProject'
 import ReferenceCard from '../components/ReferenceCard'
 import AddReferenceModal from '../components/AddReferenceModal'
-import { Plus, Search, FolderPlus, Loader2, X, Star, Eye, ChevronDown } from 'lucide-react'
+import { Plus, Search, FolderPlus, Loader2, X, Star, Eye, ChevronDown, ChevronLeft, ChevronRight, Columns } from 'lucide-react'
 import toast from 'react-hot-toast'
+
+const PAGE_SIZE = 50
 
 const SOURCE_TYPES = ['paper', 'policy', 'model_card', 'evaluation', 'government', 'news', 'other']
 
@@ -66,6 +68,36 @@ export default function Library() {
   const [yearFrom, setYearFrom] = useState('')
   const [yearTo, setYearTo] = useState('')
   const [sortBy, setSortBy] = useState('recent')
+  const [page, setPage] = useState(0)
+  const [compareMode, setCompareMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+
+  useEffect(() => {
+    setPage(0)
+  }, [colId, projectId, searchQ, filterType, filterStarred, filterUnread, filterImportant, yearFrom, yearTo])
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else if (next.size < 8) next.add(id)
+      else toast.error('Compare up to 8 references at a time')
+      return next
+    })
+  }
+
+  const exitCompareMode = () => {
+    setCompareMode(false)
+    setSelectedIds(new Set())
+  }
+
+  const goCompare = () => {
+    if (selectedIds.size < 2) {
+      toast.error('Select at least 2 references')
+      return
+    }
+    navigate(`/compare?ids=${[...selectedIds].join(',')}`)
+  }
 
   const { data: collection } = useQuery({
     queryKey: ['collection', colId],
@@ -85,20 +117,30 @@ export default function Library() {
   }
 
   const isSearching = searchQ && searchQ.length > 2
+  const offset = page * PAGE_SIZE
 
-  const { data: refs = [], isLoading } = useQuery({
-    queryKey: ['references', projectId, colId, filterType, filterStarred, filterUnread, filterImportant, yearFrom, yearTo],
-    queryFn: () => referencesApi.list({ ...serverFilters, limit: 200 }).then(r => r.data),
+  const { data: listResponse, isLoading } = useQuery({
+    queryKey: ['references', projectId, colId, filterType, filterStarred, filterUnread, filterImportant, yearFrom, yearTo, page],
+    queryFn: () => referencesApi.list({ ...serverFilters, limit: PAGE_SIZE, offset }).then(r => ({
+      results: r.data,
+      total: parseInt(r.headers['x-total-count'] || `${r.data.length}`, 10),
+    })),
     enabled: !isSearching,
+    keepPreviousData: true,
   })
+  const refs = listResponse?.results || []
+  const listTotal = listResponse?.total ?? 0
 
   const { data: searchResults } = useQuery({
-    queryKey: ['search', projectId, searchQ, colId, filterType, filterStarred, filterUnread, filterImportant, yearFrom, yearTo],
-    queryFn: () => searchApi.search({ ...serverFilters, q: searchQ }).then(r => r.data),
+    queryKey: ['search', projectId, searchQ, colId, filterType, filterStarred, filterUnread, filterImportant, yearFrom, yearTo, page],
+    queryFn: () => searchApi.search({ ...serverFilters, q: searchQ, limit: PAGE_SIZE, offset }).then(r => r.data),
     enabled: !!isSearching,
+    keepPreviousData: true,
   })
 
   let displayRefs = isSearching ? (searchResults?.results || []) : refs
+  const total = isSearching ? (searchResults?.total ?? displayRefs.length) : listTotal
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const snippets = isSearching ? Object.fromEntries((searchResults?.results || []).map(r => [r.id, r.snippet])) : {}
 
   if (sortBy === 'year') displayRefs = [...displayRefs].sort((a, b) => (b.year || 0) - (a.year || 0))
@@ -119,6 +161,13 @@ export default function Library() {
           {!collection && <p className="text-xs text-gray-400 mt-0.5">All references · select a collection from the sidebar to filter</p>}
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => compareMode ? exitCompareMode() : setCompareMode(true)}
+            className={`btn-ghost text-sm ${compareMode ? 'text-alexandria-700' : ''}`}
+            title="Compare references side by side"
+          >
+            <Columns size={14} />{compareMode ? 'Cancel compare' : 'Compare'}
+          </button>
           <button onClick={() => setShowNewCol(v => !v)} className="btn-secondary text-sm">
             <FolderPlus size={14} />New collection
           </button>
@@ -225,20 +274,59 @@ export default function Library() {
         <div>
           <p className="text-xs text-gray-400 mb-3">
             {isSearching
-              ? `${searchResults?.total ?? displayRefs.length} results for "${searchQ}"`
-              : `${displayRefs.length} reference${displayRefs.length !== 1 ? 's' : ''}`}
+              ? `${total} results for "${searchQ}"`
+              : `${total} reference${total !== 1 ? 's' : ''}`}
             {collection && ` in ${collection.name}`}
+            {totalPages > 1 && ` · page ${page + 1} of ${totalPages}`}
           </p>
           <div className="space-y-2">
             {displayRefs.map(r => (
-              <ReferenceCard key={r.id} reference={r} snippet={snippets[r.id]} />
+              <ReferenceCard
+                key={r.id}
+                reference={r}
+                snippet={snippets[r.id]}
+                selectable={compareMode}
+                selected={selectedIds.has(r.id)}
+                onToggleSelect={toggleSelect}
+              />
             ))}
           </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 mt-6">
+              <button
+                onClick={() => setPage(p => Math.max(0, p - 1))}
+                disabled={page === 0}
+                className="btn-ghost text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft size={14} /> Prev
+              </button>
+              <span className="text-xs text-gray-500 px-3">
+                Page {page + 1} of {totalPages}
+              </span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+                disabled={page >= totalPages - 1}
+                className="btn-ghost text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                Next <ChevronRight size={14} />
+              </button>
+            </div>
+          )}
         </div>
       )}
 
       {showAdd && (
         <AddReferenceModal collectionId={colId} projectId={projectId} onClose={() => setShowAdd(false)} />
+      )}
+
+      {compareMode && selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 card px-4 py-2.5 shadow-lg flex items-center gap-3 bg-white border border-alexandria-200">
+          <span className="text-sm text-gray-700">{selectedIds.size} selected</span>
+          <button onClick={goCompare} className="btn-primary text-sm" disabled={selectedIds.size < 2}>
+            <Columns size={14} /> Compare {selectedIds.size}
+          </button>
+          <button onClick={exitCompareMode} className="btn-ghost text-xs">Cancel</button>
+        </div>
       )}
     </div>
   )

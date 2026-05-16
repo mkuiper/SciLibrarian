@@ -294,6 +294,35 @@ A chronological record of what was built each cycle and key decisions made along
 
 ---
 
+## Cycle 11 — 2026-05-16 — Quote Search, Pagination, Compare View
+
+**Goal:** Make the library answer three more researcher questions reliably:
+1. "Where in any of these papers did I read the 65% figure?"  → quote search over full text.
+2. "What does this library actually contain?"  → server-side pagination so the answer isn't "the most recent 200".
+3. "How do these three papers differ on method / findings / limitations?"  → side-by-side comparison.
+
+### Quote search via weighted FTS (`models/reference.py`, `database.py`, `services/search.py`)
+- New generated `tsv tsvector` column on `references`, computed from `setweight(...title 'A') || ...abstract 'B' || ...summary 'C' || ...full_text 'D'`. PostgreSQL auto-maintains it on insert/update.
+- GIN index `ix_references_tsv` on the column; old `ix_references_fts` dropped.
+- `services/search.py` queries the column directly (no `concat` expression any more) and uses `ts_rank_cd(Reference.tsv, tsq)` for ranking.
+- `ts_headline` now scans `full_text` when present so search snippets surface the matching passage from the body, not just the abstract. Falls back to abstract+summary for refs with no extracted text.
+- Title matches still outrank body matches because of the `setweight` levels — quote search doesn't crowd out short relevant titles.
+
+### Server-side pagination (`routers/references.py`, `main.py`, `pages/Library.jsx`)
+- `GET /references` now runs a `COUNT(*)` with the same filters and returns the total in an `X-Total-Count` response header.
+- CORS middleware exposes `X-Total-Count` so the frontend can read it.
+- `limit` cap raised from 200 to 500; default still 50.
+- `Library.jsx` paginates both list and search modes at 50 per page with prev/next controls. Page resets to 0 when filters or query change. `keepPreviousData: true` so navigation feels instant.
+
+### Side-by-side comparison (`routers/references.py`, `pages/ComparePage.jsx`, `pages/Library.jsx`, `components/ReferenceCard.jsx`)
+- New `GET /references/batch?ids=1,2,3` returns up to 8 refs in one round-trip with tags eager-loaded.
+- New `/compare` route renders a wide table: authors, year, source type, **main finding / method / limitations** (from `extra_metadata.findings`), tags, summary, DOI, arXiv ID.
+- Each column header is the ref title (links to detail page) with an `X` to drop it from the comparison.
+- `Library.jsx` has a Compare toggle that turns reference cards into selectable checkboxes; floating action bar shows selection count and "Compare N". Max 8 refs to keep the table readable.
+- `ReferenceCard.jsx` gains `selectable / selected / onToggleSelect` props — click-through routes to either ref-detail or selection-toggle depending on mode.
+
+---
+
 ## Cycle 10 — 2026-05-16 — DOI / arXiv ID Deduplication
 
 **Goal:** Stop the same paper from arriving multiple times through different monitor sources (arXiv + Semantic Scholar + OpenAlex). The previous URL+title checks were too brittle — OpenAlex returns DOI URLs, arXiv returns abstract page URLs, and Semantic Scholar sometimes returns the PDF URL, so URL-equality misses them and small title variations slip past the title check.

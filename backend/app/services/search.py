@@ -52,24 +52,22 @@ async def full_text_search(
         )
 
     if q:
-        # Build FTS expressions — concat matches the GIN index created in migrations
-        doc = func.concat(
-            func.coalesce(Reference.title, ''), ' ',
-            func.coalesce(Reference.abstract, ''), ' ',
-            func.coalesce(Reference.summary, ''),
-        )
-        tsvec = func.to_tsvector('english', doc)
+        # Generated tsvector column (title=A, abstract=B, summary=C, full_text=D) — index hits this directly
         tsq = func.plainto_tsquery('english', q)
+        fts_cond = Reference.tsv.op('@@')(tsq)
+        rank_expr = func.ts_rank_cd(Reference.tsv, tsq)
 
+        # Headline scans the longest non-empty source so quote-level matches surface in context.
+        headline_source = func.coalesce(
+            func.nullif(Reference.full_text, ''),
+            func.concat(func.coalesce(Reference.abstract, ''), ' ', func.coalesce(Reference.summary, '')),
+        )
         snippet_expr = func.ts_headline(
             'english',
-            func.concat(func.coalesce(Reference.abstract, ''), ' ', func.coalesce(Reference.summary, '')),
+            headline_source,
             tsq,
-            'MaxWords=35,MinWords=15',
+            'MaxWords=35,MinWords=15,ShortWord=3',
         ).label('snippet')
-
-        fts_cond = tsvec.op('@@')(tsq)
-        rank_expr = func.ts_rank_cd(tsvec, tsq)
 
         id_stmt = select(Reference.id).where(fts_cond)
         if base_filters:

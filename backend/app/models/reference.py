@@ -1,6 +1,7 @@
 from datetime import datetime
-from typing import Optional
-from sqlalchemy import String, DateTime, Integer, ForeignKey, Text, JSON, Boolean, func, Index
+from typing import Any, Optional
+from sqlalchemy import String, DateTime, Integer, ForeignKey, Text, JSON, Boolean, func, Index, Computed
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -31,6 +32,17 @@ class Reference(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     extra_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     full_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tsv: Mapped[Optional[Any]] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('english', coalesce(title, '')), 'A') || "
+            "setweight(to_tsvector('english', coalesce(abstract, '')), 'B') || "
+            "setweight(to_tsvector('english', coalesce(summary, '')), 'C') || "
+            "setweight(to_tsvector('english', coalesce(full_text, '')), 'D')",
+            persisted=True,
+        ),
+        nullable=True,
+    )
 
     collection: Mapped[Optional["Collection"]] = relationship(back_populates="references")
     project: Mapped[Optional["Project"]] = relationship(back_populates="references")

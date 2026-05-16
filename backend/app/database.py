@@ -51,6 +51,16 @@ _MIGRATIONS = [
     'CREATE INDEX IF NOT EXISTS ix_references_arxiv_project ON "references" (project_id, arxiv_id)',
     'ALTER TABLE review_queue ADD COLUMN IF NOT EXISTS doi VARCHAR(200)',
     'ALTER TABLE review_queue ADD COLUMN IF NOT EXISTS arxiv_id VARCHAR(50)',
+    # Cycle 11: Weighted full-text search via generated tsvector column.
+    # Title=A, abstract=B, summary=C, full_text=D so title matches still outrank body matches.
+    'ALTER TABLE "references" ADD COLUMN IF NOT EXISTS tsv tsvector GENERATED ALWAYS AS ('
+    " setweight(to_tsvector('english', coalesce(title, '')), 'A') || "
+    " setweight(to_tsvector('english', coalesce(abstract, '')), 'B') || "
+    " setweight(to_tsvector('english', coalesce(summary, '')), 'C') || "
+    " setweight(to_tsvector('english', coalesce(full_text, '')), 'D')"
+    ') STORED',
+    'CREATE INDEX IF NOT EXISTS ix_references_tsv ON "references" USING GIN (tsv)',
+    'DROP INDEX IF EXISTS ix_references_fts',
 ]
 
 

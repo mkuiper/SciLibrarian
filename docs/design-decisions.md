@@ -173,6 +173,18 @@ These are all planned for future cycles.
 
 ---
 
+## Weighted FTS via a generated `tsv` column
+
+**Decision (Cycle 11):** Replace the inline `to_tsvector(concat(title, abstract, summary))` expression with a PostgreSQL **generated** `tsv tsvector` column that materialises `setweight(...title 'A') || setweight(...abstract 'B') || setweight(...summary 'C') || setweight(...full_text 'D')`. GIN index lives on the column.
+
+**Rationale:** The previous setup had two correctness traps and one missing capability. The traps: (1) the query expression had to match the index expression exactly or the index wouldn't be used — fragile any time someone touched the search code; (2) all four text fields contributed equally, so a stray match in a long full-text body could outrank a title match. The missing capability: `full_text` wasn't searchable, which meant "find where I read the 65% figure" never worked. A generated column fixes all three — the index target *is* the column, ranking is weighted via `setweight`, and the tsvector is auto-maintained on insert/update with zero application code.
+
+**Trade-off:** A `STORED` generated column duplicates the tsvector on disk. For a 50KB-cap `full_text` that's ~5-20 KB per ref of extra storage. Acceptable. `WHERE tsv @@ tsq` is now a clean column reference rather than a re-derivation, which also reads better.
+
+**Migration cost:** Adding the `STORED` generated column requires PostgreSQL to rewrite the entire `references` table under `AccessExclusiveLock`. At hundreds-to-low-thousands of refs this is a sub-second pause; at 10M+ rows it would be a real outage and a different approach (trigger-maintained tsvector + `CREATE INDEX CONCURRENTLY`) would be required. We'll cross that bridge if and when a deployment gets large enough to need it. Flagged in critical review by Gemini (see `docs/agent-experiment.md` Experiment 2).
+
+---
+
 ## DOI / arXiv ID as first-class indexed columns
 
 **Decision (Cycle 10):** Promote `doi` and `arxiv_id` out of `extra_metadata` into nullable indexed columns on `references` and `review_queue`. Check them ahead of URL / title in every dedup path.

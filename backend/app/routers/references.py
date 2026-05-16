@@ -4,7 +4,7 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, Response
 from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -225,24 +225,60 @@ async def stats(db: DB, current_user: CurrentUser, project_id: Optional[int] = N
 
 @router.get("", response_model=list[ReferenceOut])
 async def list_references(
+    response: Response,
     db: DB,
     current_user: CurrentUser,
     collection_id: Optional[int] = Query(None),
     project_id: Optional[int] = Query(None),
     source_type: Optional[str] = Query(None),
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, le=500),
     offset: int = Query(0),
 ):
-    stmt = select(Reference).options(selectinload(Reference.tags))
+    filters = []
     if collection_id is not None:
-        stmt = stmt.where(Reference.collection_id == collection_id)
+        filters.append(Reference.collection_id == collection_id)
     if project_id is not None:
-        stmt = stmt.where(Reference.project_id == project_id)
+        filters.append(Reference.project_id == project_id)
     if source_type:
-        stmt = stmt.where(Reference.source_type == source_type)
+        filters.append(Reference.source_type == source_type)
+
+    count_stmt = select(func.count(Reference.id))
+    if filters:
+        count_stmt = count_stmt.where(*filters)
+    total = (await db.execute(count_stmt)).scalar_one()
+    response.headers["X-Total-Count"] = str(total)
+
+    stmt = select(Reference).options(selectinload(Reference.tags))
+    if filters:
+        stmt = stmt.where(*filters)
     stmt = stmt.order_by(Reference.created_at.desc()).offset(offset).limit(limit)
     result = await db.execute(stmt)
     return result.scalars().all()
+
+
+@router.get("/batch", response_model=list[ReferenceOut])
+async def batch_references(
+    db: DB,
+    current_user: CurrentUser,
+    ids: str = Query(..., description="comma-separated reference IDs"),
+    project_id: Optional[int] = Query(None),
+):
+    """Fetch up to 8 references by ID in a single round-trip — used by the comparison view.
+
+    Optional project_id scopes results to that project (matches the list-endpoint pattern).
+    """
+    try:
+        id_list = [int(x) for x in ids.split(",") if x.strip()][:8]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ids must be comma-separated integers")
+    if not id_list:
+        return []
+    stmt = select(Reference).options(selectinload(Reference.tags)).where(Reference.id.in_(id_list))
+    if project_id is not None:
+        stmt = stmt.where(Reference.project_id == project_id)
+    result = await db.execute(stmt)
+    refs = {r.id: r for r in result.scalars().all()}
+    return [refs[i] for i in id_list if i in refs]
 
 
 @router.get("/{ref_id}", response_model=ReferenceOut)
