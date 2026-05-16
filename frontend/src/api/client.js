@@ -37,6 +37,7 @@ export const projectsApi = {
   updateSettings: (id, data) => api.patch(`/projects/${id}/settings`, data),
   restructureSuggestions: (id) => api.post(`/projects/${id}/restructure-suggestions`, null, { timeout: 120000 }),
   applyRestructureAction: (id, action) => api.post(`/projects/${id}/apply-restructure-action`, { action }),
+  restructureLog: (id, limit = 20) => api.get(`/projects/${id}/restructure-log`, { params: { limit } }),
   listDigests: (id) => api.get(`/projects/${id}/digests`),
   createDigest: (id, data) => api.post(`/projects/${id}/digests`, data, { timeout: 180000 }),
   getDigest: (projectId, digestId) => api.get(`/projects/${projectId}/digests/${digestId}`),

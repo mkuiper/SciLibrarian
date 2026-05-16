@@ -71,6 +71,17 @@ _MIGRATIONS = [
     ')',
     # Cycle 17: Optional rejection reason on review queue items — feeds monitor learning
     'ALTER TABLE review_queue ADD COLUMN IF NOT EXISTS rejection_reason TEXT',
+    # Cycle 18: Audit log of applied restructure actions per project
+    'CREATE TABLE IF NOT EXISTS restructure_actions ('
+    ' id SERIAL PRIMARY KEY,'
+    ' project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,'
+    ' user_id INTEGER NOT NULL REFERENCES users(id),'
+    ' action_type VARCHAR(50) NOT NULL,'
+    ' action_payload JSONB NOT NULL,'
+    ' result JSONB NOT NULL,'
+    ' applied_at TIMESTAMPTZ NOT NULL DEFAULT now()'
+    ')',
+    'CREATE INDEX IF NOT EXISTS ix_restructure_actions_project_time ON restructure_actions (project_id, applied_at DESC)',
 ]
 
 

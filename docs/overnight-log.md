@@ -18,6 +18,21 @@ If any cycle uncovers something that wants more time, I'll slow down rather than
 
 ## Cycle log
 
+### Cycle 18 — Restructure audit log — ✅ done
+
+**Built:** `restructure_actions` audit table (project_id, user_id, action_type, action_payload JSONB, result JSONB, applied_at) with composite index `(project_id, applied_at DESC)`. Every successful apply through `apply-restructure-action` now records the full action payload + result via a `_record` helper called just before returning. For `merge_collections` the source's id/name are captured to local vars before `db.delete(src)` because the autoflush triggered by the INSERT would otherwise detach the object. New `GET /projects/{id}/restructure-log` returns the most recent N (default 20, capped 100) entries. RestructurePage gains an "Applied actions" card above the analyse button that lists each entry with a friendly summary ("Created 'AI Alignment' with 3 references", "Renamed 'X' → 'Y'", etc.) and a relative timestamp. Cache invalidation hooked so applies and the log stay in sync.
+
+**Critical review** (Gemini + Claude in parallel) — both confirmed the implementation is sound:
+- SQL injection / escaping: bind parameters with `CAST(:a AS jsonb)` + `json.dumps` is the correct pattern; no double-encoding on read since SQLAlchemy auto-decodes JSONB.
+- Transactional integrity: `_record` is inside the request transaction, so if the audit insert fails the whole action rolls back — auditlog stays consistent with reality.
+- `src_id_was` / `src_name_was` capture before delete: confirmed necessary (Claude's explanation — autoflush from the audit INSERT would expire the deleted `src`).
+
+Claude flagged one real concern: the new GET endpoint doesn't verify project ownership. Same standing gap as every other `/projects/{id}/...` endpoint (Phase 4 membership work) — not a new vulnerability, but worth noting because audit-log payloads embed user_ids. NOT fixed in this cycle; piecemeal patching of this gap creates inconsistency. Will be addressed when the membership model lands.
+
+Verdict: clean implementation, no code changes from review.
+
+---
+
 ### Cycle 17 — Optional rejection reasons → monitor learning — ✅ done
 
 **Built:** new `rejection_reason TEXT` column on `review_queue`. The `ReviewDecision` schema accepts an optional reason and the `decide` endpoint persists it (strip + truncate to 1000 chars). The Cycle 12 monitor-improvement prompt in `suggest_monitor_improvements` now renders rejected items as `- title  (reason: ...)` when a reason is present, with an explicit instruction to weight reasons heavily. Frontend `QueueItem` opens an inline reason input on Reject; shift-click skips the prompt for fast rejection; Enter to submit, Escape to cancel. Rejected items in the history view display the reason in italics under the card body.

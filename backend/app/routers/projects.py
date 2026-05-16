@@ -306,7 +306,13 @@ async def apply_restructure_action(
     All collection / reference IDs are re-validated against the project before
     any write — the suggest endpoint validates too, but we don't trust the
     client to round-trip the action unchanged.
+
+    Every successful apply is recorded in `restructure_actions` (Cycle 18 audit
+    log) so the user can see what changed and reverse manually if needed.
     """
+    from sqlalchemy import text as sa_text
+    import json as _json
+
     action = body.action
     atype = action.get("type")
 
@@ -329,6 +335,20 @@ async def apply_restructure_action(
             select(Reference.id).where(Reference.id.in_(ids), Reference.project_id == project_id)
         )
         return [row[0] for row in r.all()]
+
+    async def _record(action_type: str, payload: dict, result: dict) -> dict:
+        """Persist the applied action to the audit log, then return the result unchanged."""
+        await db.execute(
+            sa_text(
+                "INSERT INTO restructure_actions (project_id, user_id, action_type, action_payload, result) "
+                "VALUES (:p, :u, :t, CAST(:a AS jsonb), CAST(:r AS jsonb))"
+            ),
+            {
+                "p": project_id, "u": current_user.id, "t": action_type,
+                "a": _json.dumps(payload), "r": _json.dumps(result),
+            },
+        )
+        return result
 
     if atype == "create_collection":
         name = (action.get("name") or "").strip()
@@ -364,7 +384,7 @@ async def apply_restructure_action(
                 .values(collection_id=new_col.id)
             )
             moved = len(valid_ids)
-        return {"ok": True, "created_collection_id": new_col.id, "moved_count": moved}
+        return await _record(atype, action, {"ok": True, "created_collection_id": new_col.id, "moved_count": moved})
 
     if atype == "rename_collection":
         col = await _collection_in_project(action.get("collection_id"))
@@ -373,11 +393,12 @@ async def apply_restructure_action(
         new_name = (action.get("new_name") or "").strip()
         if not new_name:
             raise HTTPException(400, "new_name required")
+        old_name = col.name
         col.name = new_name
         new_desc = action.get("new_description")
         if new_desc is not None:
             col.description = new_desc
-        return {"ok": True, "collection_id": col.id, "name": col.name}
+        return await _record(atype, action, {"ok": True, "collection_id": col.id, "name": col.name, "previous_name": old_name})
 
     if atype == "move_references":
         target = await _collection_in_project(action.get("target_collection_id"))
@@ -391,7 +412,7 @@ async def apply_restructure_action(
             .where(Reference.id.in_(valid_ids), Reference.project_id == project_id)
             .values(collection_id=target.id)
         )
-        return {"ok": True, "target_collection_id": target.id, "moved_count": len(valid_ids)}
+        return await _record(atype, action, {"ok": True, "target_collection_id": target.id, "moved_count": len(valid_ids), "moved_ids": valid_ids})
 
     if atype == "merge_collections":
         src = await _collection_in_project(action.get("source_collection_id"))
@@ -406,19 +427,59 @@ async def apply_restructure_action(
         )
         if kids.scalar_one() > 0:
             raise HTTPException(400, "source collection has sub-collections — move them out first")
+        src_id_was = src.id
+        src_name_was = src.name
         # Move refs, then delete source
         await db.execute(
             Reference.__table__.update()
-            .where(Reference.collection_id == src.id, Reference.project_id == project_id)
+            .where(Reference.collection_id == src_id_was, Reference.project_id == project_id)
             .values(collection_id=tgt.id)
         )
         moved = (await db.execute(
             select(func.count(Reference.id)).where(Reference.collection_id == tgt.id, Reference.project_id == project_id)
         )).scalar_one()
         await db.delete(src)
-        return {"ok": True, "target_collection_id": tgt.id, "merged_from_id": action.get("source_collection_id"), "target_total_refs": moved}
+        return await _record(atype, action, {
+            "ok": True, "target_collection_id": tgt.id,
+            "merged_from_id": src_id_was, "merged_from_name": src_name_was,
+            "target_total_refs": moved,
+        })
 
     raise HTTPException(400, f"unknown action type: {atype}")
+
+
+@router.get("/{project_id}/restructure-log", response_model=dict)
+async def restructure_log(
+    project_id: int, db: DB, current_user: CurrentUser,
+    limit: int = 20,
+):
+    """Most recent applied restructure actions for this project, newest first."""
+    from sqlalchemy import text as sa_text
+
+    project_result = await db.execute(select(Project).where(Project.id == project_id))
+    if project_result.scalar_one_or_none() is None:
+        raise HTTPException(404, "Project not found")
+
+    limit = max(1, min(100, int(limit)))
+    rows = await db.execute(
+        sa_text(
+            "SELECT id, user_id, action_type, action_payload, result, applied_at "
+            "FROM restructure_actions WHERE project_id = :p "
+            "ORDER BY applied_at DESC LIMIT :l"
+        ),
+        {"p": project_id, "l": limit},
+    )
+    entries = []
+    for row in rows.mappings():
+        entries.append({
+            "id": row["id"],
+            "user_id": row["user_id"],
+            "action_type": row["action_type"],
+            "payload": row["action_payload"],
+            "result": row["result"],
+            "applied_at": row["applied_at"].isoformat() if row["applied_at"] else None,
+        })
+    return {"entries": entries}
 
 
 @router.post("/{project_id}/digests", response_model=DigestOut, status_code=201)

@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { projectsApi } from '../api/client'
 import { useProject } from '../hooks/useProject'
-import { Sparkles, Loader2, AlertCircle, Info, Lightbulb, FolderPlus, Edit3, ArrowRight, GitMerge, Check, AlertTriangle } from 'lucide-react'
+import { Sparkles, Loader2, AlertCircle, Info, Lightbulb, FolderPlus, Edit3, ArrowRight, GitMerge, Check, AlertTriangle, History } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { formatDistanceToNow } from 'date-fns'
 
 const PRIORITY_BORDER = {
   high:   'border-red-300',
@@ -168,11 +169,41 @@ export default function RestructurePage() {
       queryClient.invalidateQueries({ queryKey: ['collections-tree'] })
       queryClient.invalidateQueries({ queryKey: ['collections-flat'] })
       queryClient.invalidateQueries({ queryKey: ['references'] })
+      queryClient.invalidateQueries({ queryKey: ['restructure-log', currentProject.id] })
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Action failed')
     } finally {
       setApplyingIndex(null)
     }
+  }
+
+  // Audit log — most recent applied actions for this project
+  const { data: logData } = useQuery({
+    queryKey: ['restructure-log', currentProject?.id],
+    queryFn: () => projectsApi.restructureLog(currentProject.id).then(r => r.data),
+    enabled: !!currentProject,
+  })
+  const logEntries = logData?.entries || []
+
+  const formatLogEntry = (entry) => {
+    const t = entry.action_type
+    const p = entry.payload || {}
+    const r = entry.result || {}
+    if (t === 'create_collection') {
+      return r.moved_count
+        ? `Created "${p.name}" with ${r.moved_count} reference(s)`
+        : `Created "${p.name}"`
+    }
+    if (t === 'rename_collection') {
+      return `Renamed "${r.previous_name}" → "${r.name}"`
+    }
+    if (t === 'move_references') {
+      return `Moved ${r.moved_count} reference(s) into collection ${r.target_collection_id}`
+    }
+    if (t === 'merge_collections') {
+      return `Merged "${r.merged_from_name}" into collection ${r.target_collection_id}`
+    }
+    return t
   }
 
   return (
@@ -202,6 +233,32 @@ export default function RestructurePage() {
         </button>
         {!currentProject && <p className="text-xs text-amber-500 mt-2">Create a project first.</p>}
       </div>
+
+      {logEntries.length > 0 && (
+        <div className="card p-5 mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <History size={14} className="text-gray-500" />
+            <h2 className="text-sm font-semibold text-gray-700">Applied actions</h2>
+            <span className="text-xs text-gray-400">— history for this project</span>
+          </div>
+          <ul className="space-y-2">
+            {logEntries.map(entry => (
+              <li key={entry.id} className="flex items-start justify-between gap-3 text-sm border-b border-gray-50 pb-2 last:border-0">
+                <div className="flex-1 min-w-0">
+                  <p className="text-gray-700">{formatLogEntry(entry)}</p>
+                  <p className="text-xs text-gray-400 mt-0.5 capitalize">{entry.action_type.replace(/_/g, ' ')}</p>
+                </div>
+                <span className="text-xs text-gray-400 flex-shrink-0">
+                  {formatDistanceToNow(new Date(entry.applied_at), { addSuffix: true })}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-gray-400 italic mt-3">
+            No automatic undo yet — to reverse a change, do it by hand in the Library or Collections page.
+          </p>
+        </div>
+      )}
 
       {result && (
         <div>
