@@ -294,6 +294,56 @@ A chronological record of what was built each cycle and key decisions made along
 
 ---
 
+## Cycle 12 — 2026-05-16 — Monitor Learning (and an Ollama binding note)
+
+### Ollama systemd binding fix (host config, not code)
+
+Operational issue surfaced during testing: the Config page reported "Ollama: not connected" even though the host service was running. Diagnosis: Ollama 0.21.2 defaults to listening on `127.0.0.1:11434`, which the backend container cannot reach.
+
+Remedy (host-side, one-time):
+
+```bash
+sudo mkdir -p /etc/systemd/system/ollama.service.d
+echo -e '[Service]\nEnvironment="OLLAMA_HOST=0.0.0.0:11434"' \
+  | sudo tee /etc/systemd/system/ollama.service.d/override.conf
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
+After this, the backend reaches Ollama via `host.docker.internal:11434` (the existing `extra_hosts: host-gateway` mapping in docker-compose.yml). Non-Docker tools that hit `localhost:11434` still work because binding to `0.0.0.0` includes loopback.
+
+Captured here (not just as a future "I'll remember it" — Mike's already hit this twice across cycles) so future sessions can paste the override and move on.
+
+### Monitor learning
+
+**Goal:** Close the feedback loop so monitors get less noisy over time. Before this, the only thing approve / reject counts did was display a precision percentage — useful for spotting bad monitors but the user still had to fix them by hand.
+
+#### Schema (`models/search_monitor.py`, `database.py`)
+- New `negative_keywords TEXT` column on `search_monitors` (nullable, comma-separated).
+
+#### Filtering (`services/proactive_search.py`)
+- `run_monitor` adds a "step 3.5" between the Alexandria relevance filter and the dedup loop. If the monitor has negative keywords, any result whose title or abstract contains one of them (case-insensitive substring) is dropped before being added to the review queue. Drops are logged.
+
+#### Suggestion service (`services/proactive_search.py`)
+- New `suggest_monitor_improvements(db, monitor)` function:
+  - Fetches the last 10 approved + last 10 rejected `ReviewQueueItem`s for the monitor.
+  - Returns early with a hint if there are <3 decisions total.
+  - Otherwise prompts Alexandria with the monitor name + query + sample lists and asks for `{refined_query, negative_keywords[], reasoning}` as JSON.
+  - The model is instructed to keep the refined query close to the original, prefer specific terms over generic ones, and admit when there isn't enough signal.
+- New `POST /review/monitors/{id}/suggest-improvements` endpoint wires it up.
+
+#### UI (`pages/Monitors.jsx`, `api/client.js`)
+- The "Improve" affordance only shows when precision < 50% with ≥5 decisions — avoids cluttering monitors that are already working well.
+- Click → inline panel with reasoning, suggested refined query, and suggested negative keywords as red pills.
+- Three apply choices: query only, keywords only, or both. Keywords are *merged* with any existing negatives so applying twice doesn't lose previous tuning.
+- Existing negative_keywords are shown on the card ("Excluding: ...") so the state is visible without opening the panel.
+
+#### Why advisory rather than automatic
+
+The system never silently adjusts a monitor — the user reviews the suggestion before it takes effect. Reason: query and exclusion rules carry research-judgment risk (a negative keyword that looks reasonable might exclude an important paper). Cheap to review, expensive to discover after the fact that good results were silently filtered out.
+
+---
+
 ## Cycle 11 — 2026-05-16 — Quote Search, Pagination, Compare View
 
 **Goal:** Make the library answer three more researcher questions reliably:

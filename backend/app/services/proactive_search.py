@@ -513,6 +513,18 @@ async def run_monitor(db: AsyncSession, monitor: SearchMonitor, model: str | Non
     # Step 3: Alexandria filters for genuine relevance
     relevant = await filter_by_relevance(all_results, monitor.name, monitor.query, model)
 
+    # Step 3.5: Filter out anything matching the monitor's negative keywords (learned from rejects)
+    if monitor.negative_keywords:
+        neg = [k.strip().lower() for k in monitor.negative_keywords.split(",") if k.strip()]
+        if neg:
+            before = len(relevant)
+            relevant = [
+                r for r in relevant
+                if not any(k in (r.get("title", "") + " " + (r.get("abstract") or "")).lower() for k in neg)
+            ]
+            if before != len(relevant):
+                logger.info(f"Monitor '{monitor.name}': negative_keywords dropped {before - len(relevant)} of {before} results")
+
     # Step 4: Deduplicate against library + existing queue, then add
     added = 0
     skipped_duplicates = 0
@@ -549,6 +561,96 @@ async def run_monitor(db: AsyncSession, monitor: SearchMonitor, model: str | Non
     await db.commit()
     logger.info(f"Monitor '{monitor.name}': {len(all_results)} found → {len(relevant)} relevant → {added} added to queue ({skipped_duplicates} duplicates skipped)")
     return added
+
+
+async def suggest_monitor_improvements(
+    db: AsyncSession, monitor: SearchMonitor, model: str | None = None
+) -> dict:
+    """
+    Ask Alexandria to refine the monitor based on recent approve/reject decisions.
+
+    Returns:
+        {refined_query, negative_keywords: [str], reasoning, samples: {approved: [...], rejected: [...]}}
+
+    Caller decides what to apply — the suggestion is advisory.
+    """
+    from app.services.llm import complete_text
+    model = model or settings.default_librarian_model
+
+    approved_stmt = (
+        select(ReviewQueueItem)
+        .where(ReviewQueueItem.monitor_id == monitor.id, ReviewQueueItem.status == "approved")
+        .order_by(ReviewQueueItem.reviewed_at.desc().nulls_last())
+        .limit(10)
+    )
+    rejected_stmt = (
+        select(ReviewQueueItem)
+        .where(ReviewQueueItem.monitor_id == monitor.id, ReviewQueueItem.status == "rejected")
+        .order_by(ReviewQueueItem.reviewed_at.desc().nulls_last())
+        .limit(10)
+    )
+    approved = (await db.execute(approved_stmt)).scalars().all()
+    rejected = (await db.execute(rejected_stmt)).scalars().all()
+
+    if len(approved) + len(rejected) < 3:
+        return {
+            "refined_query": None,
+            "negative_keywords": [],
+            "reasoning": "Not enough decisions yet — review at least 3 items before refining.",
+            "samples": {"approved": [], "rejected": []},
+        }
+
+    def sample(item):
+        return {"title": item.title, "abstract": (item.abstract or "")[:300]}
+
+    approved_samples = [sample(i) for i in approved]
+    rejected_samples = [sample(i) for i in rejected]
+
+    prompt = f"""You are tuning a literature search monitor for a researcher.
+
+Monitor name: {monitor.name}
+Current query: {monitor.query}
+Existing negative keywords: {monitor.negative_keywords or '(none)'}
+
+APPROVED items (researcher kept these):
+{chr(10).join(f"- {a['title']}" for a in approved_samples) or '(none yet)'}
+
+REJECTED items (researcher discarded these):
+{chr(10).join(f"- {r['title']}" for r in rejected_samples) or '(none yet)'}
+
+Suggest a query refinement and negative-keyword list that would surface more items like the approved ones and fewer like the rejected ones.
+
+Rules:
+- Keep the refined query close to the original — don't change the core topic.
+- Negative keywords should be specific terms (not generic words). Aim for 3-8 terms.
+- Skip negative keywords if rejections were too varied to draw a pattern.
+- Be honest: if there isn't enough signal, say so.
+
+Return JSON only, no markdown:
+{{"refined_query": "...", "negative_keywords": ["...", "..."], "reasoning": "one short paragraph"}}"""
+
+    raw = await complete_text(model, prompt, max_tokens=600)
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1].strip()
+        if raw.startswith("json"):
+            raw = raw[4:].strip()
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {
+            "refined_query": None,
+            "negative_keywords": [],
+            "reasoning": "Couldn't parse model output — try running this again.",
+            "samples": {"approved": approved_samples, "rejected": rejected_samples},
+        }
+
+    return {
+        "refined_query": parsed.get("refined_query") if parsed.get("refined_query") != monitor.query else None,
+        "negative_keywords": [k for k in (parsed.get("negative_keywords") or []) if isinstance(k, str) and k.strip()],
+        "reasoning": parsed.get("reasoning", "")[:600],
+        "samples": {"approved": approved_samples, "rejected": rejected_samples},
+    }
 
 
 async def run_all_due_monitors(db: AsyncSession) -> dict:

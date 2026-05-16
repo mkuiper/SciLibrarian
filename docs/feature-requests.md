@@ -231,13 +231,13 @@ semantics. Until then, backend scoping should be conservative and clear.
 - ✅ DOI / arXiv ID as indexed columns for stronger dedup (Cycle 10) — extracted from URLs, source adapters, and LLM-generated metadata; checked at reference create, bulk paths, and monitor queue intake
 - ✅ Server-side Library pagination via `X-Total-Count` header, prev/next controls, 50 per page (Cycle 11)
 
-### Phase 3: Research Synthesis — ✅ Largely Complete
+### Phase 3: Research Synthesis — ✅ Complete
 
 - ✅ Claim/finding extraction: `main_finding`, `method`, `limitations` extracted at ingestion into `extra_metadata.findings`
 - ✅ Research Radar: `GET /projects/{id}/radar` + Dashboard panel (new refs this week, trending tags)
 - ✅ Digest evidence links: digest prompts include full source material; three digest types
 - ✅ Monitor quality metrics: `approve_count` / `reject_count` per monitor + precision display
-- ⬜ Monitor learning from review history (query refinement suggestions) — open
+- ✅ Monitor learning from review history (Cycle 12) — `negative_keywords` column + LLM-suggested {refined_query, negative_keywords, reasoning} with human-in-the-loop apply
 
 ### Phase 4: Collaboration — ⬜ Not started
 
@@ -274,7 +274,8 @@ The most impactful remaining work, in priority order:
 3. ~~**Server-side Library pagination**~~ — ✅ shipped in Cycle 11
 4. ~~**Full-text quote search**~~ — ✅ shipped in Cycle 11
 5. ~~**Cross-reference comparison view**~~ — ✅ shipped in Cycle 11
-6. **Monitor learning from review decisions** — summarise why recent rejections were off-target, suggest query refinements
+6. ~~**Monitor learning from review decisions**~~ — ✅ shipped in Cycle 12
 7. **Project membership and roles** — prerequisite for all team workflow features
 8. **Citation graph via Semantic Scholar** — cited-by / cites navigation across the library
 9. **Living literature review** — generated synthesis per project / collection that updates as papers arrive
+10. **Optional rejection reason at decide-time** — feed user-supplied "why I rejected this" into monitor learning prompts for stronger signal

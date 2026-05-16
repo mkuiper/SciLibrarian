@@ -17,6 +17,7 @@ class SearchMonitorUpdate(BaseModel):
     sources: Optional[str] = None
     frequency: Optional[str] = None
     enabled: Optional[bool] = None
+    negative_keywords: Optional[str] = None
 
 
 class SearchMonitorOut(BaseModel):
@@ -31,6 +32,7 @@ class SearchMonitorOut(BaseModel):
     last_run: Optional[datetime]
     approve_count: int = 0
     reject_count: int = 0
+    negative_keywords: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

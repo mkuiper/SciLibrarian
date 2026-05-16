@@ -20,6 +20,7 @@ class SearchMonitor(Base):
     last_run: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     approve_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     reject_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    negative_keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="search_monitors")

@@ -173,6 +173,21 @@ These are all planned for future cycles.
 
 ---
 
+## Monitor improvements: LLM-suggested, human-applied
+
+**Decision (Cycle 12):** When a monitor's precision drops, Alexandria can suggest a refined query and negative keywords — but the user always reviews and clicks "Apply" before the monitor changes. No silent auto-tuning.
+
+**Rationale:** A monitor's query encodes research judgment ("watch papers about constitutional AI alignment but not generic safety overviews"). A negative keyword that *looks* reasonable to an LLM might exclude an important edge case ("safety" excluded too broadly drops half the corpus). Silent auto-tuning would erode trust the first time it filtered something the researcher wanted. Cheap to put a human in the loop here — the user sees the reasoning and a one-click apply.
+
+**What gets learned:**
+- The LLM sees the last 10 approved + 10 rejected items for the monitor and the existing query / negative keywords. It suggests {refined_query, negative_keywords, reasoning}.
+- Keywords are merged with any existing negatives (set union) on apply, so cumulative tuning doesn't lose history.
+- We don't store the suggestions long-term — they're regenerated on demand from the current decision history.
+
+**Trade-off:** This is a "good first version" that only uses titles + abstracts of decided items. It can't learn from *why* the user rejected (we don't ask). A richer version would prompt for an optional rejection reason at decision time and feed that into the suggestion prompt. Deferred until usage shows whether the current signal is enough.
+
+---
+
 ## Weighted FTS via a generated `tsv` column
 
 **Decision (Cycle 11):** Replace the inline `to_tsvector(concat(title, abstract, summary))` expression with a PostgreSQL **generated** `tsv tsvector` column that materialises `setweight(...title 'A') || setweight(...abstract 'B') || setweight(...summary 'C') || setweight(...full_text 'D')`. GIN index lives on the column.

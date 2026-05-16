@@ -97,6 +97,7 @@ export const reviewApi = {
   updateMonitor: (id, data) => api.patch(`/review/monitors/${id}`, data),
   deleteMonitor: (id) => api.delete(`/review/monitors/${id}`),
   runMonitor: (id) => api.post(`/review/monitors/${id}/run`),
+  suggestMonitorImprovements: (id) => api.post(`/review/monitors/${id}/suggest-improvements`, null, { timeout: 60000 }),
 }
 
 export const configApi = {

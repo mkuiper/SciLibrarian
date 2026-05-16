@@ -61,6 +61,8 @@ _MIGRATIONS = [
     ') STORED',
     'CREATE INDEX IF NOT EXISTS ix_references_tsv ON "references" USING GIN (tsv)',
     'DROP INDEX IF EXISTS ix_references_fts',
+    # Cycle 12: Monitor learning — negative keywords filter rejected patterns
+    'ALTER TABLE search_monitors ADD COLUMN IF NOT EXISTS negative_keywords TEXT',
 ]
 
 

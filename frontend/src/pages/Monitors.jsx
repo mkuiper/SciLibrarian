@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { reviewApi } from '../api/client'
 import { useProject } from '../hooks/useProject'
-import { Plus, Play, Pause, Trash2, Loader2, Radio } from 'lucide-react'
+import { Plus, Play, Pause, Trash2, Loader2, Radio, Sparkles, Check, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -82,7 +82,13 @@ function MonitorForm({ onClose, projectId }) {
 
 function MonitorCard({ monitor }) {
   const [running, setRunning] = useState(false)
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestion, setSuggestion] = useState(null)
   const queryClient = useQueryClient()
+
+  const totalDecisions = monitor.approve_count + monitor.reject_count
+  const precision = totalDecisions > 0 ? monitor.approve_count / totalDecisions : null
+  const showImproveButton = totalDecisions >= 5 && precision !== null && precision < 0.5
 
   const runNow = async () => {
     setRunning(true)
@@ -94,6 +100,40 @@ function MonitorCard({ monitor }) {
       toast.error('Failed to run monitor')
     } finally {
       setRunning(false)
+    }
+  }
+
+  const askForSuggestions = async () => {
+    setSuggesting(true)
+    try {
+      const { data } = await reviewApi.suggestMonitorImprovements(monitor.id)
+      setSuggestion(data)
+    } catch {
+      toast.error('Failed to generate suggestions')
+    } finally {
+      setSuggesting(false)
+    }
+  }
+
+  const applySuggestion = async (parts) => {
+    const patch = {}
+    if (parts.includes('query') && suggestion.refined_query) patch.query = suggestion.refined_query
+    if (parts.includes('negative_keywords') && suggestion.negative_keywords?.length) {
+      const existing = (monitor.negative_keywords || '').split(',').map(s => s.trim()).filter(Boolean)
+      const merged = Array.from(new Set([...existing, ...suggestion.negative_keywords]))
+      patch.negative_keywords = merged.join(', ')
+    }
+    if (Object.keys(patch).length === 0) {
+      toast.error('Nothing to apply')
+      return
+    }
+    try {
+      await reviewApi.updateMonitor(monitor.id, patch)
+      queryClient.invalidateQueries({ queryKey: ['monitors'] })
+      toast.success('Monitor updated')
+      setSuggestion(null)
+    } catch {
+      toast.error('Failed to apply changes')
     }
   }
 
@@ -142,17 +182,30 @@ function MonitorCard({ monitor }) {
               </>
             )}
           </div>
-          {(monitor.approve_count + monitor.reject_count) > 0 && (
+          {totalDecisions > 0 && (
             <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
               <span className="text-emerald-600">✓ {monitor.approve_count} approved</span>
               <span className="text-red-400">✗ {monitor.reject_count} rejected</span>
-              <span className={`font-medium ${
-                (monitor.approve_count / (monitor.approve_count + monitor.reject_count)) >= 0.6
-                  ? 'text-emerald-600' : 'text-amber-500'
-              }`}>
-                {Math.round(100 * monitor.approve_count / (monitor.approve_count + monitor.reject_count))}% precision
+              <span className={`font-medium ${precision >= 0.6 ? 'text-emerald-600' : 'text-amber-500'}`}>
+                {Math.round(100 * precision)}% precision
               </span>
+              {showImproveButton && (
+                <button
+                  onClick={askForSuggestions}
+                  disabled={suggesting}
+                  className="text-xs text-alexandria-700 hover:text-alexandria-800 flex items-center gap-1 ml-auto"
+                  title="Ask Alexandria to refine this monitor based on your decisions"
+                >
+                  {suggesting ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                  Improve
+                </button>
+              )}
             </div>
+          )}
+          {monitor.negative_keywords && (
+            <p className="text-xs text-gray-400 mt-1">
+              <span className="text-gray-500">Excluding:</span> {monitor.negative_keywords}
+            </p>
           )}
         </div>
         <div className="flex gap-1.5">
@@ -167,6 +220,56 @@ function MonitorCard({ monitor }) {
           </button>
         </div>
       </div>
+
+      {suggestion && (
+        <div className="mt-4 pt-4 border-t border-gray-100">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles size={13} className="text-alexandria-600" />
+            <span className="text-sm font-semibold text-gray-700">Suggested refinements</span>
+            <button onClick={() => setSuggestion(null)} className="ml-auto text-gray-300 hover:text-gray-600">
+              <X size={14} />
+            </button>
+          </div>
+          {suggestion.reasoning && (
+            <p className="text-xs text-gray-600 leading-relaxed mb-3">{suggestion.reasoning}</p>
+          )}
+          {suggestion.refined_query && (
+            <div className="mb-2">
+              <span className="text-xs text-gray-400">Refined query:</span>
+              <p className="text-xs font-mono bg-gray-50 px-2 py-1 rounded mt-0.5">{suggestion.refined_query}</p>
+            </div>
+          )}
+          {suggestion.negative_keywords?.length > 0 && (
+            <div className="mb-3">
+              <span className="text-xs text-gray-400">Negative keywords:</span>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {suggestion.negative_keywords.map(k => (
+                  <span key={k} className="badge bg-red-50 text-red-600 text-xs">{k}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {(suggestion.refined_query || suggestion.negative_keywords?.length > 0) ? (
+            <div className="flex gap-2">
+              {suggestion.refined_query && (
+                <button onClick={() => applySuggestion(['query'])} className="btn-secondary text-xs">
+                  <Check size={12} /> Apply query only
+                </button>
+              )}
+              {suggestion.negative_keywords?.length > 0 && (
+                <button onClick={() => applySuggestion(['negative_keywords'])} className="btn-secondary text-xs">
+                  <Check size={12} /> Apply keywords only
+                </button>
+              )}
+              <button onClick={() => applySuggestion(['query', 'negative_keywords'])} className="btn-primary text-xs">
+                <Check size={12} /> Apply both
+              </button>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400 italic">No actionable refinements found.</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

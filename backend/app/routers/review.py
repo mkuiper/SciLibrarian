@@ -11,7 +11,7 @@ from app.models.reference import Reference, ReferenceTag
 from app.models.search_monitor import SearchMonitor
 from app.schemas.review_queue import ReviewQueueItemOut
 from app.schemas.search_monitor import SearchMonitorCreate, SearchMonitorUpdate, SearchMonitorOut
-from app.services.proactive_search import run_monitor
+from app.services.proactive_search import run_monitor, suggest_monitor_improvements
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -190,3 +190,12 @@ async def run_monitor_now(monitor_id: int, db: DB, current_user: CurrentUser):
         raise HTTPException(status_code=404, detail="Monitor not found")
     added = await run_monitor(db, monitor)
     return {"added_to_queue": added}
+
+
+@router.post("/monitors/{monitor_id}/suggest-improvements", response_model=dict)
+async def suggest_improvements(monitor_id: int, db: DB, current_user: CurrentUser):
+    result = await db.execute(select(SearchMonitor).where(SearchMonitor.id == monitor_id, SearchMonitor.user_id == current_user.id))
+    monitor = result.scalar_one_or_none()
+    if not monitor:
+        raise HTTPException(status_code=404, detail="Monitor not found")
+    return await suggest_monitor_improvements(db, monitor)
