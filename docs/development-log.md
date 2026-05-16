@@ -296,34 +296,15 @@ A chronological record of what was built each cycle and key decisions made along
 
 ## Planned: Future Cycles
 
-- Alembic migration to add embedding column + pgvector extension enable
-- Background embedding generation for existing references
-- Semantic search endpoint wired to frontend search
-- Email delivery for monthly digests (SMTP config)
-- Batch upload (zip file of PDFs)
-- Rate limiting middleware
-- Audit log (who added/modified what)
+See `docs/feature-requests.md` for the authoritative roadmap with phase completion status. The most pressing remaining items, in priority order:
 
-- pgvector semantic/embedding search upgrade (significant quality improvement for retrieval)
-- Reference tag editing inline
-- Batch upload (zip of PDFs)
-- Email delivery for monthly digests (SMTP config)
-- Search result deduplication in monitor queue
-- OpenAlex abstract inverted index reconstruction (already coded, needs testing)
-- Rate limiting and API key validation on startup
-
-- Scheduled digest automation (APScheduler monthly trigger)
-- pgvector semantic search upgrade
-- Project switching UI (support multiple active projects)
-- Email/notification for digest delivery
-- Cloud deployment config (production docker-compose, nginx, S3 uploads)
-- Reference tag editing inline
-- Batch upload (zip file of PDFs)
-
-- Restructure suggestions UI (Alexandria recommends collection reorganisation)
-- Bulk actions in review queue (approve all / reject all)
-- Reference editing in-place
-- Project switching (support multiple active projects)
-- Scheduled digest (auto-generate monthly, deliver via email)
-- pgvector semantic search upgrade
-- Better Ollama model detection (ping `/api/tags` to list installed models)
+1. Enforce project access on direct reference endpoints (`GET/PATCH/DELETE /references/{id}`, file serving, BibTeX export) — open security gap flagged by Codex review
+2. DOI / arXiv ID as indexed columns for stronger deduplication
+3. Server-side pagination on the Library list view (currently capped at 200)
+4. Monitor learning from review history (query refinement suggestions, negative keywords)
+5. Project membership / roles — prerequisite for Phase 4 collaboration features
+6. pgvector hybrid semantic + lexical search
+7. Cloud deployment config (production docker-compose, nginx, S3 uploads)
+8. Email delivery for monthly digests (SMTP config)
+9. Rate limiting middleware + audit log
+10. Better Ollama model detection (ping `/api/tags` to list installed models)
