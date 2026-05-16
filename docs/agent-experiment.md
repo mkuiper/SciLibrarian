@@ -108,6 +108,67 @@ Time accounting (rough):
 
 ---
 
+## Experiment 3 — Multi-agent critical review of Cycle 15 (citation graph)
+
+**Date:** 2026-05-16
+**Delegated to:** Gemini CLI 0.42.0 + Claude Code CLI 2.1.143 (in parallel)
+**Working tree:** Cycle 15 — citation graph via Semantic Scholar
+
+### Why this experiment
+
+The user asked: "Try some critical review stages too with the other coding agents. They may have some outsider insights." The citation-graph diff touches an external API, an in-process cache, async safety, and UI state — good surface for outsider review. Sent the same diff + focus prompt to two different vendors' CLIs in parallel to see whether they catch different things.
+
+Codex was attempted again (would have provided structured JSON output, ideal here) but its bwrap sandbox still fails in this environment with the same `RTM_NEWADDR` error from Experiment 2 — Codex review is unusable until that sandbox issue is fixed upstream or the agent moves to a different isolation backend.
+
+### Findings — what each agent caught
+
+| Finding | Gemini | Claude | Real bug? |
+|---------|--------|--------|-----------|
+| Unbounded cache memory leak | ✓ | ✓ | YES |
+| No dogpile / thundering-herd protection | ✓ | ✓ | YES |
+| Sequential S2 calls (should `gather`) | ✓ | implied (single client suggestion) | YES |
+| Library lookup runs on every miss | ✓ | — | Acceptable at scale |
+| IDOR — `/citations` doesn't check project access | ✓ | ✓ | Pre-existing, documented |
+| **Stale `in_library_id` cached for 1h after Add** | ✗ | ✓ | YES — really important |
+| **Old-style arXiv IDs (`cs/0301012`) dropped by regex** | ✗ | ✓ | YES — would silently miss matches |
+| **DOI URL not encoded (special chars in DOI)** | ✗ | ✓ | YES |
+| **Frontend citations query not invalidated after Add** | ✗ | ✓ | YES |
+| **HTTP errors propagate as 500 instead of structured error** | partially (rate limit) | ✓ | YES |
+| Single AsyncClient for both calls | ✗ | ✓ | Style, but improves perf |
+
+### Verdict — Gemini vs Claude as reviewers
+
+Gemini's review was good on the high-level architecture concerns (cache lifecycle, rate limiting, sequential latency) and confidently flagged the IDOR. Its prose-style report is easier to read but it produced fewer concrete bug catches than Claude.
+
+Claude was the stronger reviewer here. It caught five specific bugs Gemini missed, including the most subtle one — **caching `in_library_id` inside the payload means the panel keeps showing "Add" for an hour after the user actually adds a paper**. That's the kind of bug that only shows up in real use and would have generated user-reported friction. It also flagged the old-style arXiv regex (a real correctness gap for older papers), the DOI URL-encoding (DOIs legally contain reserved chars), and the missing cache invalidation on the frontend.
+
+Both agents agreed on the architectural findings — that's a strong signal those are real, and worth fixing.
+
+### Actions taken in response
+
+All eight real bugs fixed in the same commit:
+
+1. **Bounded cache** — `MAX_CACHE_ENTRIES=200`, FIFO eviction by timestamp when full.
+2. **Dogpile protection** — `asyncio.Lock` per cache key, double-checked locking inside the critical section.
+3. **Stale `in_library_id`** — cache now stores only the raw S2 paper lists; library matching runs on every call. Adding a paper flips the row from "Add" to "in library" immediately.
+4. **Old-style arXiv IDs** — `normalise_arxiv_id` widened with `_ARXIV_OLD` regex matching `archive[.subcat]/NNNNNNN[vN]`.
+5. **DOI URL encoding** — `encodeURIComponent(id).replace(/%2F/g, '/')` preserves the legal slash while escaping everything else.
+6. **Frontend invalidation** — Add success now invalidates `['citations']` queries too, not just `['references']`.
+7. **HTTP error handling** — `_fetch_raw` exceptions caught at the boundary, returns structured `{error, references: [], cited_by: []}` with rate-limit-specific messaging. The existing amber error card in the UI renders this.
+8. **Parallel S2 fetches** — `asyncio.gather(refs_task, cites_task)` inside a single `AsyncClient`. Cuts cold-cache latency roughly in half.
+
+### Time accounting
+
+- Diff capture + prompt drafting: ~3 min
+- Both agents in parallel: ~45 s
+- Aggregating findings, separating real bugs from style: ~5 min
+- Applying eight fixes + verifying: ~15 min
+- Total: ~25 min — would have shipped a worse feature without the review pass, and the user would have hit the stale-`in_library_id` bug within a few minutes of using the Add button.
+
+**Takeaway for future cycles:** running both reviewers in parallel is worth the marginal cost. They cover different blind spots. Codex would have been a third independent lens — worth retrying once its sandbox issue is resolved.
+
+---
+
 ## Experiment 2 — Critical review of Cycle 11 diff
 
 **Date:** 2026-05-16

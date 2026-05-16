@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { referencesApi, collectionsApi } from '../api/client'
-import { ArrowLeft, ExternalLink, FileText, Trash2, Loader2, Copy, Download, ChevronDown, ChevronUp, Pencil, Check, X, Star, Eye, Clock, CheckCircle, StickyNote, RefreshCw } from 'lucide-react'
+import { ArrowLeft, ExternalLink, FileText, Trash2, Loader2, Copy, Download, ChevronDown, ChevronUp, Pencil, Check, X, Star, Eye, Clock, CheckCircle, StickyNote, RefreshCw, Network, Plus } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
 const TYPE_COLORS = {
@@ -12,6 +13,161 @@ const TYPE_COLORS = {
   evaluation:  'bg-amber-50 text-amber-700',
   government:  'bg-red-50 text-red-700',
   other:       'bg-gray-100 text-gray-600',
+}
+
+function CitationPaperRow({ paper, projectId }) {
+  const [adding, setAdding] = useState(false)
+  const queryClient = useQueryClient()
+
+  const addToLibrary = async () => {
+    // DOIs and old-style arXiv IDs can contain reserved URL characters (slashes,
+    // commas, semicolons). encodeURIComponent over the whole identifier, then
+    // unescape the legal '/' that DOIs/arxiv categories need.
+    const encodeId = (id) => encodeURIComponent(id).replace(/%2F/g, '/')
+    const url = paper.doi ? `https://doi.org/${encodeId(paper.doi)}`
+              : paper.arxiv_id ? `https://arxiv.org/abs/${encodeId(paper.arxiv_id)}`
+              : null
+    if (!url) {
+      toast.error('No DOI or arXiv ID to ingest from')
+      return
+    }
+    setAdding(true)
+    try {
+      await referencesApi.fromUrl(url, { project_id: projectId })
+      queryClient.invalidateQueries({ queryKey: ['references'] })
+      queryClient.invalidateQueries({ queryKey: ['citations'] })
+      toast.success(`Added: ${paper.title.slice(0, 50)}`)
+    } catch (e) {
+      const detail = e.response?.data?.detail
+      if (detail?.existing_id) {
+        toast.success(`Already in library`)
+        queryClient.invalidateQueries({ queryKey: ['citations'] })
+      } else {
+        toast.error(typeof detail === 'string' ? detail : 'Failed to add')
+      }
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  return (
+    <div className="flex items-start gap-2 py-2 border-b border-gray-50 last:border-0">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-gray-700 line-clamp-2">{paper.title}</p>
+        {(paper.authors || paper.year) && (
+          <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">
+            {paper.authors}{paper.authors && paper.year && ' · '}{paper.year}
+          </p>
+        )}
+      </div>
+      <div className="flex-shrink-0">
+        {paper.in_library_id ? (
+          <Link
+            to={`/references/${paper.in_library_id}`}
+            className="badge bg-emerald-50 text-emerald-700 text-xs"
+            title="Open in library"
+          >
+            in library
+          </Link>
+        ) : (paper.doi || paper.arxiv_id) ? (
+          <button
+            onClick={addToLibrary}
+            disabled={adding}
+            className="btn-ghost text-xs gap-1 py-1"
+            title="Add to library"
+          >
+            {adding ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+            Add
+          </button>
+        ) : (
+          <span className="text-xs text-gray-300">no ID</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CitationsPanel({ refId, projectId, hasDoiOrArxiv }) {
+  const [expanded, setExpanded] = useState(false)
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['citations', refId],
+    queryFn: () => referencesApi.citations(refId).then(r => r.data),
+    enabled: expanded && hasDoiOrArxiv,
+    staleTime: 1000 * 60 * 30,
+  })
+
+  if (!hasDoiOrArxiv) {
+    return null
+  }
+
+  const refs = data?.references || []
+  const citedBy = data?.cited_by || []
+
+  return (
+    <div className="mb-6">
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-600 transition-colors"
+      >
+        {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        <Network size={11} />
+        Citations {expanded ? '(hide)' : '(show)'}
+      </button>
+
+      {expanded && (
+        <div className="mt-3 space-y-4">
+          {isLoading && (
+            <div className="flex items-center gap-2 text-xs text-gray-400 py-3">
+              <Loader2 size={12} className="animate-spin" /> Looking up Semantic Scholar...
+            </div>
+          )}
+
+          {data?.error && (
+            <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">{data.error}</p>
+          )}
+
+          {data && !data.error && (
+            <>
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <h3 className="text-xs font-semibold text-gray-600">References</h3>
+                  <span className="text-xs text-gray-400">({refs.length})</span>
+                  <span className="text-xs text-gray-300">— papers this paper cites</span>
+                </div>
+                {refs.length > 0 ? (
+                  <div className="border border-gray-100 rounded-xl px-3 max-h-72 overflow-y-auto">
+                    {refs.map((p, i) => (
+                      <CitationPaperRow key={p.semantic_scholar_id || `r-${i}`} paper={p} projectId={projectId} />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 italic">None returned by Semantic Scholar</p>
+                )}
+              </div>
+
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <h3 className="text-xs font-semibold text-gray-600">Cited by</h3>
+                  <span className="text-xs text-gray-400">({citedBy.length})</span>
+                  <span className="text-xs text-gray-300">— papers that cite this paper</span>
+                </div>
+                {citedBy.length > 0 ? (
+                  <div className="border border-gray-100 rounded-xl px-3 max-h-72 overflow-y-auto">
+                    {citedBy.map((p, i) => (
+                      <CitationPaperRow key={p.semantic_scholar_id || `c-${i}`} paper={p} projectId={projectId} />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 italic">No citing papers returned</p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function PdfViewer({ refId }) {
@@ -509,6 +665,13 @@ export default function ReferencePage() {
             )}
           </div>
         )}
+
+        {/* Citation graph (Semantic Scholar) */}
+        <CitationsPanel
+          refId={ref.id}
+          projectId={ref.project_id}
+          hasDoiOrArxiv={!!(ref.doi || ref.arxiv_id)}
+        />
 
         {/* PDF viewer (embedded) */}
         {hasPdf && <PdfViewer refId={ref.id} />}

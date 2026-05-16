@@ -379,6 +379,22 @@ async def delete_reference(ref_id: int, db: DB, current_user: CurrentUser):
     await db.delete(ref)
 
 
+@router.get("/{ref_id}/citations", response_model=dict)
+async def reference_citations(ref_id: int, db: DB, current_user: CurrentUser):
+    """Return papers that cite or are cited by this reference, via Semantic Scholar.
+
+    Each paper carries `in_library_id` when we already have it (matched by DOI / arXiv ID).
+    Result is cached in-process for 1 hour per reference.
+    """
+    from app.services.citations import fetch_citations
+
+    result = await db.execute(select(Reference).where(Reference.id == ref_id))
+    ref = result.scalar_one_or_none()
+    if not ref:
+        raise HTTPException(status_code=404, detail="Reference not found")
+    return await fetch_citations(db, ref)
+
+
 @router.get("/{ref_id}/file")
 async def serve_file(ref_id: int, db: DB, current_user: CurrentUser):
     """Serve the uploaded PDF file for in-browser viewing."""

@@ -173,6 +173,18 @@ These are all planned for future cycles.
 
 ---
 
+## Citation cache: store raw, derive matches per-request
+
+**Decision (Cycle 15):** The citation cache stores only the raw Semantic Scholar paper lists. The `in_library_id` field on each row is recomputed on every call from a fresh `SELECT id, doi, arxiv_id FROM references WHERE project_id = ?`.
+
+**Rationale:** The naive design caches the entire response (including library matches) for 1 hour. But "is this paper in my library?" is mutable state — the user can click "Add" and the answer flips. With the naive design, the panel keeps showing "Add" until the cache expires, even though the paper is now there. That's the kind of bug that surfaces immediately in real use and erodes trust. Splitting the cache costs one indexed query per call (`SELECT id, doi, arxiv_id` against an indexed `project_id`) — negligible at our scale, correct at any scale.
+
+**The cache itself is bounded with FIFO eviction:** at 200 entries the oldest 40 get evicted. Plus per-key `asyncio.Lock` with double-checked locking inside the critical section so concurrent cold misses on the same key don't all hit Semantic Scholar. These are textbook protections that we'd skipped in the v1 — caught in critical review (see `docs/agent-experiment.md` Experiment 3).
+
+**What still doesn't survive multi-worker deploys:** the cache is per-process. At `uvicorn --workers 4` each worker has its own dict. Acceptable today (single-worker), needs Redis when it isn't.
+
+---
+
 ## Restructure actions: structured, validated, one-at-a-time
 
 **Decision (Cycle 14):** Promote restructure suggestions from free-text descriptions to typed, ID-referencing actions with per-action Apply. No bulk apply.

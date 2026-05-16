@@ -248,9 +248,9 @@ semantics. Until then, backend scoping should be conservative and clear.
 - ⬜ Notification settings for monitors and digests
 - ⬜ Team-scoped access control
 
-### Phase 5: Advanced Context — ⬜ Not started
+### Phase 5: Advanced Context — partial
 
-- ⬜ Citation graph and related-work view
+- ✅ Citation graph and related-work view (Cycle 15) — Semantic Scholar lookup of `references` + `cited_by` for any ref with a DOI or arXiv ID; in-library matching by ID; one-click Add for external papers
 - ⬜ Hybrid embedding + lexical search (pgvector)
 - ⬜ Living literature review generation
 
@@ -279,6 +279,7 @@ The most impactful remaining work, in priority order:
 5. ~~**Cross-reference comparison view**~~ — ✅ shipped in Cycle 11
 6. ~~**Monitor learning from review decisions**~~ — ✅ shipped in Cycle 12
 7. **Project membership and roles** — prerequisite for all team workflow features
-8. **Citation graph via Semantic Scholar** — cited-by / cites navigation across the library
+8. ~~**Citation graph via Semantic Scholar**~~ — ✅ shipped in Cycle 15
 9. **Living literature review** — generated synthesis per project / collection that updates as papers arrive
 10. **Optional rejection reason at decide-time** — feed user-supplied "why I rejected this" into monitor learning prompts for stronger signal
+11. **Hybrid embedding + lexical search (pgvector)** — semantic search on top of the Cycle 11 FTS for concept-level retrieval

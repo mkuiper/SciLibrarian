@@ -102,7 +102,12 @@ def normalise_doi(raw: str | None) -> str | None:
     return s if s.startswith("10.") else None
 
 
+_ARXIV_NEW = re.compile(r"\d{4}\.\d{4,5}(v\d+)?")
+_ARXIV_OLD = re.compile(r"[a-z-]+(\.[a-z]{2})?/\d{7}(v\d+)?")
+
+
 def normalise_arxiv_id(raw: str | None) -> str | None:
+    """Canonical arXiv ID: new style 'YYMM.NNNNN[vN]' or old style 'archive[.subcat]/NNNNNNN[vN]'."""
     if not raw or not isinstance(raw, str):
         return None
     s = raw.strip()
@@ -110,8 +115,10 @@ def normalise_arxiv_id(raw: str | None) -> str | None:
         if s.lower().startswith(prefix.lower()):
             s = s[len(prefix):]
             break
-    s = s.rstrip("/").removesuffix(".pdf")
-    return s.lower() if re.fullmatch(r"\d{4}\.\d{4,5}(v\d+)?", s) else None
+    s = s.rstrip("/").removesuffix(".pdf").lower()
+    if _ARXIV_NEW.fullmatch(s) or _ARXIV_OLD.fullmatch(s):
+        return s
+    return None
 
 
 def extract_ids_from_url(url: str | None) -> tuple[str | None, str | None]:

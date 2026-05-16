@@ -294,6 +294,38 @@ A chronological record of what was built each cycle and key decisions made along
 
 ---
 
+## Cycle 15 — 2026-05-16 — Citation Graph via Semantic Scholar
+
+### What it does
+
+For any reference with a DOI or arXiv ID, fetch the surrounding citation network from Semantic Scholar — the papers this reference cites (`references`) and the papers that cite it (`cited_by`). Each returned paper is cross-checked against the project's library by DOI / arXiv ID, so the UI can show "in library" (linking to the detail page) or an "Add" button that calls the existing `/references/from-url` flow.
+
+The DOI / arXiv ID columns added in Cycle 10 for deduplication get their second purpose here — they're the keys S2 uses to look up papers and the keys we use to match results back to the library.
+
+### Backend (`services/citations.py`, `routers/references.py`)
+
+- New `GET /references/{id}/citations` endpoint.
+- `fetch_citations(db, ref)` builds a Semantic Scholar identifier (`DOI:...` or `ARXIV:...`), fetches `/paper/{id}/references` and `/paper/{id}/citations` **in parallel via `asyncio.gather`**, normalises each row into `{title, authors, year, doi, arxiv_id, in_library_id}`, then runs the library-match lookup.
+- **Library matching is recomputed on every call** — only the raw S2 paper lists are cached. This was a Cycle 15 review finding: caching `in_library_id` inside the payload would leave the panel showing "Add" for up to an hour after the user actually adds a paper. Splitting the cache costs one small SQL query per call (`SELECT id, doi, arxiv_id FROM references WHERE project_id = ?`) and is correct.
+- Cache is **bounded** (`MAX_CACHE_ENTRIES = 200`, FIFO eviction by timestamp) so a long-running process can't leak. **Dogpile protection** via per-key `asyncio.Lock` with double-checked locking inside the critical section.
+- HTTP / network errors are caught at the boundary; the endpoint returns `{error: "...", references: [], cited_by: []}` rather than a 500, with rate-limit-specific messaging when S2 returns 429.
+
+### Old-style arXiv IDs
+
+The Cycle 10 `normalise_arxiv_id` only matched modern form (`YYMM.NNNNN`). The critical review caught that old-style IDs (`cs/0301012`, `hep-th/9905111`) — common for pre-2007 papers — were being silently dropped to `None`. Widened the regex to accept `archive[.subcat]/NNNNNNN[vN]` as well, so old papers can now match across the library and S2.
+
+### Frontend (`pages/ReferencePage.jsx`)
+
+- New `CitationsPanel` component on the reference detail page. Collapsible (lazy-loaded — S2 can take ~3s cold) with two lists.
+- Each `CitationPaperRow`: in-library papers link to their detail page; external papers show an "Add" button that calls `/references/from-url` with a DOI or arXiv URL. The URL builder uses `encodeURIComponent(...).replace(/%2F/g, '/')` so DOIs containing reserved characters (legal in DOIs) don't produce malformed URLs.
+- Add success invalidates both `['references']` and `['citations']` query caches so the row flips from "Add" to "in library" instantly.
+
+### How the cycle was reviewed
+
+Sent the diff to Gemini CLI and Claude Code CLI in parallel for outsider review. They agreed on the architectural findings (cache lifecycle, dogpile, sequential calls), and Claude caught five additional specific bugs Gemini missed — including the most subtle one (stale `in_library_id`). Codex was attempted again but its bwrap sandbox issue persists. Full write-up in `docs/agent-experiment.md` Experiment 3.
+
+---
+
 ## Cycle 14.2 — 2026-05-16 — Restructure honours the configured model
 
 Found while testing: even with a global model override active for librarian chat, restructure analysis kept hitting `claude-sonnet-4-6`. Two layers of the same bug:

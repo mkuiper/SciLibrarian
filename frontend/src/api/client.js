@@ -84,6 +84,7 @@ export const referencesApi = {
   delete: (id) => api.delete(`/references/${id}`),
   fileUrl: (id) => `${BASE}/references/${id}/file`,
   bibtexUrl: (id) => `${BASE}/references/${id}/bibtex`,
+  citations: (id) => api.get(`/references/${id}/citations`, { timeout: 30000 }),
 }
 
 export const searchApi = {
