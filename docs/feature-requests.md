@@ -238,6 +238,7 @@ semantics. Until then, backend scoping should be conservative and clear.
 - ✅ Digest evidence links: digest prompts include full source material; three digest types
 - ✅ Monitor quality metrics: `approve_count` / `reject_count` per monitor + precision display
 - ✅ Monitor learning from review history (Cycle 12) — `negative_keywords` column + LLM-suggested {refined_query, negative_keywords, reasoning} with human-in-the-loop apply
+- ✅ Library restructure with applyable actions (Cycle 14) — Alexandria emits structured `create_collection` / `rename_collection` / `move_references` / `merge_collections` actions with resolved IDs; per-action Apply button after preview
 
 ### Phase 4: Collaboration — ⬜ Not started
 

@@ -294,6 +294,59 @@ A chronological record of what was built each cycle and key decisions made along
 
 ---
 
+## Cycle 14 — 2026-05-16 — Applyable Restructure Actions
+
+### Why this cycle
+
+Restructure was advice-only: Alexandria returned free-text descriptions of what *could* be done, but nothing was executable. Users had to read the suggestions and then go reorganise the library by hand. The whole point of having a librarian agent is that she can help do the work, not just describe it.
+
+### Structured actions (`services/project_setup.py`)
+
+Old `suggest_restructure` returned `{recommendations: [{type, description, priority}]}` — strings only. Rewrote the prompt to emit `{summary, actions: [...]}` where each action has the exact fields needed to execute:
+
+- **`create_collection`** — `{name, description, parent_id, populate_with_reference_ids[]}`
+- **`rename_collection`** — `{collection_id, new_name, new_description}`
+- **`move_references`** — `{reference_ids[], target_collection_id}`
+- **`merge_collections`** — `{source_collection_id, target_collection_id}` (source deleted after refs move)
+
+The LLM now gets collection IDs + ref_counts and ~50 recent references with `{id, title, tags, collection_id, year}`. Without IDs in the prompt it can't return actionable plans. Kept the legacy `recommendations` key tolerant so older clients don't 500 mid-deploy.
+
+### ID resolution + validation (`routers/projects.py`)
+
+The suggest endpoint resolves every ID server-side **before** returning the response:
+
+- `target_collection_id` → `target_collection_name`
+- `reference_ids` → `reference_previews: [{id, title, year}]`
+- Any unknown ID flags the action with `invalid: true, invalid_reason: "..."` so the frontend can render it greyed out — useful for debugging hallucinations without 500ing the whole batch.
+
+Merge actions are rejected at this stage if the source collection has sub-collections (refuses to silently orphan or cascade-delete them) — the user must move children out first.
+
+### Apply endpoint (`routers/projects.py`)
+
+`POST /projects/{id}/apply-restructure-action` takes one action and executes it atomically. Every ID is **re-validated against the project** at apply time (we don't trust the client to round-trip the action unchanged). Each action type maps to a small set of SQL operations:
+
+- create → one INSERT, optional bulk UPDATE for population
+- rename → one UPDATE
+- move → one bulk UPDATE
+- merge → bulk UPDATE on refs, then DELETE collection (after children check)
+
+All inside the request transaction, so a failure mid-action rolls back cleanly.
+
+### Per-action UI (`pages/RestructurePage.jsx`)
+
+Rewrote the page. Each action renders as a typed card with a concrete preview built from the resolved IDs:
+
+- create: shows new name, parent (if any), and the actual titles of refs that will populate it
+- rename: shows old name (struck through) → new name
+- move: shows count + actual titles + target collection name
+- merge: shows source name + ref count → target name, with a warning that source will be deleted
+
+Each card has its own Apply button; invalid actions are disabled with the reason visible. After apply, the card flips to "Applied" and the collections / references caches are invalidated so other pages reflect the change immediately.
+
+No "Apply all" — every action requires a deliberate click. Reorg is structural; one bad LLM suggestion shouldn't be one click from a mess.
+
+---
+
 ## Cycle 13 — 2026-05-16 — Library-Aware Alex + Global Model Override
 
 ### Why this cycle

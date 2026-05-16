@@ -173,6 +173,22 @@ These are all planned for future cycles.
 
 ---
 
+## Restructure actions: structured, validated, one-at-a-time
+
+**Decision (Cycle 14):** Promote restructure suggestions from free-text descriptions to typed, ID-referencing actions with per-action Apply. No bulk apply.
+
+**Rationale:** Letting the LLM *edit* library structure (not just describe it) is the only way the feature pays for itself — describing what to do and then doing it by hand is twice the work. But structural changes to a library are expensive to undo: a bad merge merges, and there's no project-level undo. Three guardrails make this safe enough to ship:
+
+1. **IDs everywhere.** The LLM gets real collection / reference IDs in the prompt and must return real IDs in the output. The backend resolves them to names/titles before returning to the client — hallucinated IDs are flagged `invalid` and can't be applied.
+2. **Re-validation at apply time.** Suggest-time validation isn't enough — we don't trust the client to round-trip the action unchanged. Every ID is re-checked against the project at apply.
+3. **Per-action Apply, no batch.** Each action requires a deliberate click. "Apply all" would be one bad suggestion from a mess — the small UX cost of clicking individually is worth it.
+
+**What stays manual:** No undo log, no audit trail. If you regret a move, you re-move it by hand. We can add a session-level applied-actions log later (option C from the v1 scoping); v1 keeps the surface tight.
+
+**Why merge refuses sub-collections:** Cascading a delete to silently orphan or recursively-remove sub-collections is exactly the kind of opaque-but-destructive behaviour we want to avoid. The user moves children out first. The error message tells them so.
+
+---
+
 ## Alex needs grounding, not just instructions
 
 **Decision (Cycle 13):** Every librarian chat call prepends a compact LIBRARY SNAPSHOT (total count, top tags, recent titles, source-type breakdown) to the system prompt, regardless of whether tool calling is available.

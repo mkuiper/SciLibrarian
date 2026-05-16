@@ -1,7 +1,7 @@
-from typing import Any
+from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from app.dependencies import DB, CurrentUser
@@ -157,30 +157,260 @@ async def update_project(project_id: int, data: ProjectUpdate, db: DB, current_u
 
 @router.post("/{project_id}/restructure-suggestions", response_model=dict)
 async def restructure_suggestions(project_id: int, db: DB, current_user: CurrentUser):
-    from app.models.reference import Reference
-    from sqlalchemy.orm import selectinload
-
     project_result = await db.execute(select(Project).where(Project.id == project_id))
     project = project_result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
     cols_result = await db.execute(select(Collection).where(Collection.project_id == project_id))
-    collections = [{"id": c.id, "name": c.name, "parent_id": c.parent_id} for c in cols_result.scalars().all()]
+    raw_collections = cols_result.scalars().all()
+
+    # Per-collection ref counts for the prompt
+    count_rows = await db.execute(
+        select(Reference.collection_id, func.count(Reference.id))
+        .where(Reference.project_id == project_id)
+        .group_by(Reference.collection_id)
+    )
+    ref_counts = {row[0]: row[1] for row in count_rows}
+
+    collections_for_prompt = [
+        {
+            "id": c.id, "name": c.name, "description": c.description,
+            "parent_id": c.parent_id, "ref_count": ref_counts.get(c.id, 0),
+        }
+        for c in raw_collections
+    ]
+    collection_ids = {c.id for c in raw_collections}
+    collection_names = {c.id: c.name for c in raw_collections}
+
+    # Track which collections have children — used to reject unsafe merges later
+    has_children: set[int] = set()
+    for c in raw_collections:
+        if c.parent_id is not None:
+            has_children.add(c.parent_id)
 
     refs_result = await db.execute(
         select(Reference)
         .options(selectinload(Reference.tags))
         .where(Reference.project_id == project_id)
         .order_by(Reference.created_at.desc())
-        .limit(30)
+        .limit(50)
     )
-    refs = [
-        {"title": r.title, "source_type": r.source_type, "collection_id": r.collection_id, "tags": [t.tag for t in r.tags]}
-        for r in refs_result.scalars().all()
+    raw_refs = refs_result.scalars().all()
+    ref_titles = {r.id: r.title for r in raw_refs}
+    ref_years = {r.id: r.year for r in raw_refs}
+
+    refs_for_prompt = [
+        {
+            "id": r.id, "title": r.title[:140], "year": r.year,
+            "collection_id": r.collection_id, "tags": [t.tag for t in r.tags][:6],
+        }
+        for r in raw_refs
     ]
 
-    return await suggest_restructure(project.name, collections, refs)
+    suggested = await suggest_restructure(project.name, collections_for_prompt, refs_for_prompt)
+    actions_in = suggested.get("actions") or []
+
+    # Resolve IDs and validate every action — anything pointing at an unknown
+    # or out-of-project ID is marked invalid so the UI shows it but can't apply it.
+    resolved_actions: list[dict] = []
+    for action in actions_in:
+        if not isinstance(action, dict):
+            continue
+        atype = action.get("type")
+        out = {**action, "invalid": False, "invalid_reason": None}
+
+        def invalidate(reason: str):
+            out["invalid"] = True
+            out["invalid_reason"] = reason
+
+        if atype == "create_collection":
+            parent = action.get("parent_id")
+            if parent is not None and parent not in collection_ids:
+                invalidate(f"parent_id {parent} doesn't belong to this project")
+            populate_ids = action.get("populate_with_reference_ids") or []
+            unknown_refs = [rid for rid in populate_ids if rid not in ref_titles]
+            if unknown_refs:
+                invalidate(f"reference IDs not in project: {unknown_refs[:5]}")
+            out["reference_previews"] = [
+                {"id": rid, "title": ref_titles.get(rid, "?"), "year": ref_years.get(rid)}
+                for rid in populate_ids if rid in ref_titles
+            ]
+
+        elif atype == "rename_collection":
+            cid = action.get("collection_id")
+            if cid not in collection_ids:
+                invalidate(f"collection_id {cid} not in project")
+            out["current_name"] = collection_names.get(cid)
+
+        elif atype == "move_references":
+            target = action.get("target_collection_id")
+            ref_ids = action.get("reference_ids") or []
+            if target not in collection_ids:
+                invalidate(f"target_collection_id {target} not in project")
+            unknown_refs = [rid for rid in ref_ids if rid not in ref_titles]
+            if unknown_refs:
+                invalidate(f"reference IDs not in project: {unknown_refs[:5]}")
+            out["target_collection_name"] = collection_names.get(target)
+            out["reference_previews"] = [
+                {"id": rid, "title": ref_titles.get(rid, "?"), "year": ref_years.get(rid)}
+                for rid in ref_ids if rid in ref_titles
+            ]
+
+        elif atype == "merge_collections":
+            src = action.get("source_collection_id")
+            tgt = action.get("target_collection_id")
+            if src not in collection_ids:
+                invalidate(f"source_collection_id {src} not in project")
+            elif tgt not in collection_ids:
+                invalidate(f"target_collection_id {tgt} not in project")
+            elif src == tgt:
+                invalidate("source and target collections are the same")
+            elif src in has_children:
+                invalidate("source collection has sub-collections — move them out first")
+            out["source_collection_name"] = collection_names.get(src)
+            out["target_collection_name"] = collection_names.get(tgt)
+            out["source_ref_count"] = ref_counts.get(src, 0)
+
+        else:
+            invalidate(f"unknown action type: {atype}")
+
+        resolved_actions.append(out)
+
+    return {
+        "summary": suggested.get("summary", ""),
+        "actions": resolved_actions,
+    }
+
+
+# ── Apply a restructure action ───────────────────────────────────────────────
+
+class ApplyRestructureRequest(BaseModel):
+    action: dict
+
+
+@router.post("/{project_id}/apply-restructure-action", response_model=dict)
+async def apply_restructure_action(
+    project_id: int, body: ApplyRestructureRequest, db: DB, current_user: CurrentUser,
+):
+    """Execute one structured restructure action against the project.
+
+    All collection / reference IDs are re-validated against the project before
+    any write — the suggest endpoint validates too, but we don't trust the
+    client to round-trip the action unchanged.
+    """
+    action = body.action
+    atype = action.get("type")
+
+    project_result = await db.execute(select(Project).where(Project.id == project_id))
+    if project_result.scalar_one_or_none() is None:
+        raise HTTPException(404, "Project not found")
+
+    async def _collection_in_project(cid: int) -> Collection | None:
+        if cid is None:
+            return None
+        r = await db.execute(
+            select(Collection).where(Collection.id == cid, Collection.project_id == project_id)
+        )
+        return r.scalar_one_or_none()
+
+    async def _ref_ids_in_project(ids: list[int]) -> list[int]:
+        if not ids:
+            return []
+        r = await db.execute(
+            select(Reference.id).where(Reference.id.in_(ids), Reference.project_id == project_id)
+        )
+        return [row[0] for row in r.all()]
+
+    if atype == "create_collection":
+        name = (action.get("name") or "").strip()
+        if not name:
+            raise HTTPException(400, "name required")
+        parent_id = action.get("parent_id")
+        if parent_id is not None:
+            parent = await _collection_in_project(parent_id)
+            if not parent:
+                raise HTTPException(400, "parent_id not in this project")
+            parent_path = parent.path
+        else:
+            parent_path = "/"
+        new_col = Collection(
+            name=name,
+            description=action.get("description") or "",
+            parent_id=parent_id,
+            project_id=project_id,
+            path=parent_path,  # finalised after flush below
+            created_by=current_user.id,
+        )
+        db.add(new_col)
+        await db.flush()
+        new_col.path = f"{parent_path}{new_col.id}/"
+
+        populate_ids = action.get("populate_with_reference_ids") or []
+        valid_ids = await _ref_ids_in_project(populate_ids)
+        moved = 0
+        if valid_ids:
+            await db.execute(
+                Reference.__table__.update()
+                .where(Reference.id.in_(valid_ids), Reference.project_id == project_id)
+                .values(collection_id=new_col.id)
+            )
+            moved = len(valid_ids)
+        return {"ok": True, "created_collection_id": new_col.id, "moved_count": moved}
+
+    if atype == "rename_collection":
+        col = await _collection_in_project(action.get("collection_id"))
+        if not col:
+            raise HTTPException(400, "collection_id not in this project")
+        new_name = (action.get("new_name") or "").strip()
+        if not new_name:
+            raise HTTPException(400, "new_name required")
+        col.name = new_name
+        new_desc = action.get("new_description")
+        if new_desc is not None:
+            col.description = new_desc
+        return {"ok": True, "collection_id": col.id, "name": col.name}
+
+    if atype == "move_references":
+        target = await _collection_in_project(action.get("target_collection_id"))
+        if not target:
+            raise HTTPException(400, "target_collection_id not in this project")
+        valid_ids = await _ref_ids_in_project(action.get("reference_ids") or [])
+        if not valid_ids:
+            raise HTTPException(400, "no valid reference_ids in this project")
+        await db.execute(
+            Reference.__table__.update()
+            .where(Reference.id.in_(valid_ids), Reference.project_id == project_id)
+            .values(collection_id=target.id)
+        )
+        return {"ok": True, "target_collection_id": target.id, "moved_count": len(valid_ids)}
+
+    if atype == "merge_collections":
+        src = await _collection_in_project(action.get("source_collection_id"))
+        tgt = await _collection_in_project(action.get("target_collection_id"))
+        if not src or not tgt:
+            raise HTTPException(400, "source/target collection not in this project")
+        if src.id == tgt.id:
+            raise HTTPException(400, "source and target are the same")
+        # Refuse if source has children — caller must move them out first
+        kids = await db.execute(
+            select(func.count(Collection.id)).where(Collection.parent_id == src.id)
+        )
+        if kids.scalar_one() > 0:
+            raise HTTPException(400, "source collection has sub-collections — move them out first")
+        # Move refs, then delete source
+        await db.execute(
+            Reference.__table__.update()
+            .where(Reference.collection_id == src.id, Reference.project_id == project_id)
+            .values(collection_id=tgt.id)
+        )
+        moved = (await db.execute(
+            select(func.count(Reference.id)).where(Reference.collection_id == tgt.id, Reference.project_id == project_id)
+        )).scalar_one()
+        await db.delete(src)
+        return {"ok": True, "target_collection_id": tgt.id, "merged_from_id": action.get("source_collection_id"), "target_total_refs": moved}
+
+    raise HTTPException(400, f"unknown action type: {atype}")
 
 
 @router.post("/{project_id}/digests", response_model=DigestOut, status_code=201)
