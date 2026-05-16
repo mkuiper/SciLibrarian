@@ -255,13 +255,15 @@ semantics. Until then, backend scoping should be conservative and clear.
 
 ---
 
-## Admin & Operator Tooling (added Cycle 9)
+## Admin & Operator Tooling (added Cycle 9, extended Cycle 13)
 
 - ✅ API key health checks: 1-token call per provider, inline Test button
 - ✅ System Status panel: DB stats, upload storage, scheduler state + next-run times
 - ✅ Scheduler pause/resume without container restart
+- ✅ Global model override — one model for every agent call (Cycle 13)
 - ⬜ User management (list/deactivate users) — deferred until project membership model is in place
 - ⬜ Email ingestion config via UI (currently .env only)
+- ⬜ Ollama diagnostics panel (live `/api/tags` poll, OLLAMA_HOST binding hint, journalctl tail when reachable)
 
 ---
 

@@ -173,6 +173,26 @@ These are all planned for future cycles.
 
 ---
 
+## Alex needs grounding, not just instructions
+
+**Decision (Cycle 13):** Every librarian chat call prepends a compact LIBRARY SNAPSHOT (total count, top tags, recent titles, source-type breakdown) to the system prompt, regardless of whether tool calling is available.
+
+**Rationale:** Telling Alex "always search the library" works only if the model can run the tool. Local Ollama models without tool calling can't — they rely on the context-injection path, and that path only fires when the user's last message produces FTS matches. Broad questions ("what do we have on X?") produced empty matches and an ungrounded model would confabulate. The snapshot is cheap to compute (one COUNT + one tag aggregate + one recent-titles query, all indexed) and gives Alex enough to answer general questions correctly. It also nudges tone — the model sees real titles and tag distributions and responds like someone who knows the corpus rather than a generic assistant.
+
+**Trade-off:** A few hundred tokens added to every chat. Acceptable — that's a rounding error against the response budget, and the alternative (silent confabulation on broad questions) was actively harmful to trust.
+
+---
+
+## Global model override as a separate concern
+
+**Decision (Cycle 13):** The per-agent model assignment (librarian / ingestion / digest) stays as it was, but a global `model_override` in a new `app_settings` table intercepts the model name at every LLM entrypoint when set.
+
+**Rationale:** Two valid use cases co-exist. (1) Cloud-rich setup: different model per task makes sense (Haiku for ingestion, Sonnet for chat, Opus for digests). (2) Local-only setup: one Ollama model is loaded in GPU memory, switching wastes time and VRAM, so route everything through it. Building the override as a separate setting that doesn't destroy the per-agent config means clearing it returns to the original layout exactly — important because users will toggle this when they're trying things, and "where did my settings go?" is a worse failure than "I forgot the override is on" (the banner mitigates the latter).
+
+**Implementation note:** The override is consulted at every LLM entrypoint via an `effective_model()` helper. The cache is module-level and invalidated on write so a single config change is visible instantly. For multi-process deployments later, the cache will need a TTL or pub/sub — but at single-container scale, in-process is correct.
+
+---
+
 ## Monitor improvements: LLM-suggested, human-applied
 
 **Decision (Cycle 12):** When a monitor's precision drops, Alexandria can suggest a refined query and negative keywords — but the user always reviews and clicks "Apply" before the monitor changes. No silent auto-tuning.

@@ -294,6 +294,38 @@ A chronological record of what was built each cycle and key decisions made along
 
 ---
 
+## Cycle 13 — 2026-05-16 — Library-Aware Alex + Global Model Override
+
+### Why this cycle
+
+Two issues surfaced during live testing. First, when Alex was wired to a local Ollama model, she didn't seem to *know* what was in the library — even broad questions like "what do we have on X?" got generic answers. Second, with mostly local Ollama models available, the per-agent model assignment was busywork: the user just wanted "use this one model for everything."
+
+### Alex is now library-grounded (`services/librarian.py`)
+
+Three things were wrong:
+
+1. **Stale FTS in the librarian's `_search_library`.** It still built an inline `to_tsvector(concat(...))` expression that no longer matched the Cycle 11 GIN index, so it didn't hit the index, didn't search `full_text`, and didn't use weighted ranking. Fixed: queries `Reference.tsv` directly.
+
+2. **Nothing to inject for general-knowledge questions.** When the FTS came back empty, Alex got the line "(No matching references found.)" and nothing else — so an Ollama model with no tool calling just confabulated. Added `_library_snapshot(db, project_id)` returning `{total, by_type, top_tags, recent_titles}` and `_format_snapshot()` to render it as plain text. The snapshot is prepended to the system prompt at the top of *every* `chat()` call (all three paths: cloud tools, Ollama tool-loop, Ollama context-injection, non-tool cloud).
+
+3. **System prompt didn't establish Alex as the librarian-with-knowledge.** Rewrote `DEFAULT_SYSTEM_PROMPT` to give Alex an identity ("Alexandria — the user's personal AI research librarian, responsible for this specific library"), explicit instructions for how to use the snapshot ("when the user asks broad questions... answer from the snapshot directly — don't claim ignorance"), and a closing line ("talk like a knowledgeable colleague who has actually read this library — not a generic assistant") that nudges tone.
+
+The fix is most visible on Ollama models without tool calling — they go from "I don't have access to your library" to "Your library has 47 papers, mostly on AI alignment and interpretability; the most recent additions are X, Y, Z. What are you looking for?"
+
+### Global model override (`models/app_settings`, `services/app_settings.py`, `services/llm.py`, `routers/config.py`, `pages/ConfigPage.jsx`)
+
+- New `app_settings` table (singleton key/value with `JSONB value` and `updated_at`).
+- `services/app_settings.py` provides `get(key)` / `set_value(key, v)` / `delete(key)` with a module-level cache that hydrates on first read and updates in-process on write.
+- New `effective_model(model)` helper in `services/llm.py` consulted at the start of every public LLM entrypoint (`complete_text`, `stream_text`, `complete`, `librarian.chat`). If `model_override` is set in `app_settings`, every requested model is replaced with it before any provider routing.
+- New endpoints `GET /config/overrides` and `PUT /config/overrides/model` (empty string clears).
+- Config page gets an "Apply One Model to All Agents" section above per-agent assignment. Shows a banner when override is active; picker uses the same grouped MODEL_GROUPS as the per-agent dropdowns.
+
+### Why an override instead of changing the per-project settings
+
+Per-project assignments still make sense when you have multiple capable providers — fast model for ingestion, smart model for chat. But when only one model is available (one local Ollama model loaded into GPU), setting it three places is friction, and the user can forget which assignment is which. The override is a single switch that doesn't destroy the per-agent config — clearing the override restores the previous setup exactly.
+
+---
+
 ## Cycle 12 — 2026-05-16 — Monitor Learning (and an Ollama binding note)
 
 ### Ollama systemd binding fix (host config, not code)

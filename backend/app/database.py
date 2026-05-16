@@ -63,6 +63,12 @@ _MIGRATIONS = [
     'DROP INDEX IF EXISTS ix_references_fts',
     # Cycle 12: Monitor learning — negative keywords filter rejected patterns
     'ALTER TABLE search_monitors ADD COLUMN IF NOT EXISTS negative_keywords TEXT',
+    # Cycle 13: App-wide singleton settings (global model override etc.)
+    'CREATE TABLE IF NOT EXISTS app_settings ('
+    ' key TEXT PRIMARY KEY,'
+    ' value JSONB NOT NULL,'
+    ' updated_at TIMESTAMPTZ NOT NULL DEFAULT now()'
+    ')',
 ]
 
 

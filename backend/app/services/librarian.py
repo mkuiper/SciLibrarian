@@ -21,24 +21,32 @@ from sqlalchemy import select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.reference import Reference
+from app.models.reference import Reference, ReferenceTag
 from app.services.llm import (
     model_supports_tools, _build_kwargs, _ollama_base_url,
     _ollama_model_supports_tools, _ollama_stream,
 )
 import litellm
 
-DEFAULT_SYSTEM_PROMPT = """You are Alexandria, an expert AI research librarian.
-Your role is to help researchers find, understand, and synthesise information.
+DEFAULT_SYSTEM_PROMPT = """You are Alexandria (Alex) — the user's personal AI research librarian.
+You are responsible for this specific library and you know its contents.
 
-You have access to tools: always search the library before answering research questions.
-When the library lacks coverage, use web_search to supplement — but clearly distinguish
-library sources from web sources.
+At the start of each conversation you are given a LIBRARY SNAPSHOT describing what's currently in
+the library: total count, top tags, recent additions. Use it to ground your answers.
 
-When citing library references, include the reference ID in brackets after the title:
-e.g. "...as shown in Attention Is All You Need [42]..."
-At the end of responses that draw on library content, add a "### Sources" section listing
-each cited library reference on its own line as: - [ID] Title"""
+When the user asks broad questions like "what's in the library?", "what do we have on X?",
+or "what's new?", answer from the snapshot and recent-titles list directly — don't claim ignorance.
+
+For specific research questions, always search the library first. You will also be given
+auto-retrieved matches for the user's most recent question — read those before answering.
+When the library lacks coverage, web search can supplement, but clearly distinguish library
+sources from web sources.
+
+Citation format: include the reference ID in brackets after the title, e.g.
+"...as shown in Attention Is All You Need [42]...". At the end of any response that draws on
+library content, add a "### Sources" section with one line per cited reference: - [ID] Title
+
+Talk like a knowledgeable colleague who has actually read this library — not a generic assistant."""
 
 TOOLS = [
     {
@@ -108,22 +116,15 @@ async def _search_library(db: AsyncSession, query: str, project_id: int | None =
     if not q:
         return []
 
-    doc = func.concat(
-        func.coalesce(Reference.title, ''), ' ',
-        func.coalesce(Reference.abstract, ''), ' ',
-        func.coalesce(Reference.summary, ''),
-    )
-    tsvec = func.to_tsvector('english', doc)
     tsq = func.plainto_tsquery('english', q)
-
     stmt = (
         select(Reference)
         .options(selectinload(Reference.tags))
-        .where(tsvec.op('@@')(tsq))
+        .where(Reference.tsv.op('@@')(tsq))
     )
     if project_id:
         stmt = stmt.where(Reference.project_id == project_id)
-    stmt = stmt.order_by(func.ts_rank_cd(tsvec, tsq).desc()).limit(8)
+    stmt = stmt.order_by(func.ts_rank_cd(Reference.tsv, tsq).desc()).limit(8)
 
     result = await db.execute(stmt)
     return [
@@ -134,6 +135,64 @@ async def _search_library(db: AsyncSession, query: str, project_id: int | None =
         }
         for r in result.scalars().all()
     ]
+
+
+async def _library_snapshot(db: AsyncSession, project_id: int | None = None) -> dict:
+    """Compact view of what's in the library — given to Alex as grounding context."""
+    base = select(Reference)
+    if project_id:
+        base = base.where(Reference.project_id == project_id)
+
+    total = (await db.execute(select(func.count(Reference.id)).select_from(base.subquery()))).scalar_one()
+    if total == 0:
+        return {"total": 0, "top_tags": [], "recent_titles": [], "by_type": {}}
+
+    type_rows = await db.execute(
+        select(Reference.source_type, func.count(Reference.id))
+        .where(Reference.project_id == project_id if project_id else True)
+        .group_by(Reference.source_type)
+    )
+    by_type = {row[0]: row[1] for row in type_rows}
+
+    tag_stmt = (
+        select(ReferenceTag.tag, func.count(ReferenceTag.id).label("n"))
+        .join(Reference, Reference.id == ReferenceTag.reference_id)
+        .group_by(ReferenceTag.tag)
+        .order_by(func.count(ReferenceTag.id).desc())
+        .limit(15)
+    )
+    if project_id:
+        tag_stmt = tag_stmt.where(Reference.project_id == project_id)
+    tag_rows = await db.execute(tag_stmt)
+    top_tags = [{"tag": row[0], "count": row[1]} for row in tag_rows]
+
+    recent_stmt = base.order_by(Reference.created_at.desc()).limit(8)
+    recent = (await db.execute(recent_stmt)).scalars().all()
+    recent_titles = [
+        {"id": r.id, "title": r.title, "year": r.year, "authors": (r.authors or "")[:80]}
+        for r in recent
+    ]
+
+    return {"total": total, "top_tags": top_tags, "recent_titles": recent_titles, "by_type": by_type}
+
+
+def _format_snapshot(snap: dict) -> str:
+    """Render the snapshot as compact text for the system prompt."""
+    if snap["total"] == 0:
+        return "LIBRARY SNAPSHOT: This library is empty. Tell the user to add references first."
+
+    by_type = ", ".join(f"{n} {t.replace('_', ' ')}" for t, n in snap["by_type"].items())
+    top_tags = ", ".join(f"{t['tag']} ({t['count']})" for t in snap["top_tags"][:12])
+    recent = "\n".join(
+        f"  [{r['id']}] {r['title']}" + (f" — {r['authors']}" if r['authors'] else "") + (f" ({r['year']})" if r['year'] else "")
+        for r in snap["recent_titles"]
+    )
+    return (
+        f"LIBRARY SNAPSHOT (project-scoped):\n"
+        f"- Total: {snap['total']} references — {by_type}\n"
+        f"- Top tags: {top_tags or '(none yet)'}\n"
+        f"- Most recent additions:\n{recent or '  (none)'}"
+    )
 
 
 async def _get_full_text(db: AsyncSession, reference_id: int) -> dict:
@@ -209,7 +268,13 @@ async def chat(
     project_settings: dict | None = None,
     project_id: int | None = None,
 ) -> AsyncIterator[str]:
-    system = system_prompt or DEFAULT_SYSTEM_PROMPT
+    from app.services.llm import effective_model
+    model = await effective_model(model)
+
+    base_system = system_prompt or DEFAULT_SYSTEM_PROMPT
+    snapshot = await _library_snapshot(db, project_id=project_id)
+    system = base_system + "\n\n" + _format_snapshot(snapshot)
+
     if model.startswith("ollama/"):
         async for chunk in _ollama_chat(db, messages, model, system, project_settings, project_id=project_id):
             yield chunk

@@ -277,6 +277,20 @@ async def _ollama_stream(
                     break
 
 
+# ── Global model override ─────────────────────────────────────────────────────
+
+async def effective_model(model: str) -> str:
+    """Swap the requested model for the global override when one is set.
+
+    Called at every LLM entrypoint so a single config switch can route all agent
+    traffic (librarian, ingestion, digest, monitor suggestions) through one model
+    — useful when only one local Ollama model is available, for example.
+    """
+    from app.services import app_settings
+    override = await app_settings.get("model_override")
+    return override if override else model
+
+
 # ── Public interface ──────────────────────────────────────────────────────────
 
 async def complete_text(
@@ -287,6 +301,7 @@ async def complete_text(
     project_settings: dict | None = None,
 ) -> str:
     """Single prompt → text response. Works for all providers."""
+    model = await effective_model(model)
     messages = [{"role": "user", "content": prompt}]
 
     if model.startswith("ollama/"):
@@ -314,6 +329,7 @@ async def stream_text(
     project_settings: dict | None = None,
 ) -> AsyncIterator[str]:
     """Streaming text completion. Works for all providers."""
+    model = await effective_model(model)
     if model.startswith("ollama/"):
         model_name = model.replace("ollama/", "")
         async for text, _ in _ollama_stream(model_name, messages, system, max_tokens,
@@ -347,6 +363,7 @@ async def complete(
     project_settings: dict | None = None,
 ) -> dict:
     """Single completion call (non-streaming). Returns raw response dict."""
+    model = await effective_model(model)
     if model.startswith("ollama/"):
         model_name = model.replace("ollama/", "")
         return await _ollama_complete(model_name, messages, system, max_tokens,

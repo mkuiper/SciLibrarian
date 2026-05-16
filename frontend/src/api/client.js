@@ -106,6 +106,9 @@ export const configApi = {
   testKey: (provider, key = '') => api.post('/config/test-key', { provider, key }),
   systemStatus: () => api.get('/config/system'),
   schedulerControl: (action) => api.post(`/config/scheduler/${action}`),
+  getOverrides: () => api.get('/config/overrides'),
+  setModelOverride: (model) => api.put('/config/overrides/model', { model }),
+  allModels: () => api.get('/config/models'),
 }
 
 export const librarianApi = {

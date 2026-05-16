@@ -212,6 +212,43 @@ export default function ConfigPage() {
     refetchInterval: false,
   })
 
+  const { data: overrides, refetch: refetchOverrides } = useQuery({
+    queryKey: ['config-overrides'],
+    queryFn: () => configApi.getOverrides().then(r => r.data),
+  })
+
+  const [overrideModel, setOverrideModel] = useState('')
+  useEffect(() => {
+    setOverrideModel(overrides?.model_override || '')
+  }, [overrides?.model_override])
+
+  const [overrideBusy, setOverrideBusy] = useState(false)
+  const applyOverride = async () => {
+    setOverrideBusy(true)
+    try {
+      await configApi.setModelOverride(overrideModel || null)
+      await refetchOverrides()
+      toast.success(overrideModel ? `All agents → ${overrideModel}` : 'Override cleared')
+    } catch {
+      toast.error('Failed to update override')
+    } finally {
+      setOverrideBusy(false)
+    }
+  }
+  const clearOverride = async () => {
+    setOverrideBusy(true)
+    try {
+      await configApi.setModelOverride(null)
+      setOverrideModel('')
+      await refetchOverrides()
+      toast.success('Override cleared')
+    } catch {
+      toast.error('Failed to clear override')
+    } finally {
+      setOverrideBusy(false)
+    }
+  }
+
   const { data: projects = [] } = useQuery({
     queryKey: ['projects'],
     queryFn: () => projectsApi.list().then(r => r.data),
@@ -423,6 +460,54 @@ sudo systemctl daemon-reload && sudo systemctl start ollama`}
             </p>
           </div>
         )}
+      </Section>
+
+      {/* ── Global model override ─────────────────────────── */}
+      <Section title="Apply One Model to All Agents">
+        <p className="text-xs text-gray-400 mb-3">
+          Optional override that routes every agent call (librarian chat, ingestion, digests, monitor
+          suggestions) through a single model — useful when only one local Ollama model is available.
+          Per-agent assignments below are ignored while this is set.
+        </p>
+        {overrides?.model_override && (
+          <div className="mb-3 p-3 bg-alexandria-50 border border-alexandria-200 rounded-xl text-sm flex items-center gap-2">
+            <span className="text-alexandria-800 font-medium">Active:</span>
+            <code className="text-alexandria-700 bg-white px-2 py-0.5 rounded text-xs">{overrides.model_override}</code>
+            <span className="text-xs text-alexandria-600 ml-auto">all agents use this</span>
+          </div>
+        )}
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <label className="label">Override model</label>
+            <select
+              className="input"
+              value={overrideModel}
+              onChange={e => setOverrideModel(e.target.value)}
+            >
+              <option value="">(no override — per-agent settings below apply)</option>
+              {MODEL_GROUPS.map(group => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.models.map(m => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={applyOverride}
+            disabled={overrideBusy || overrideModel === (overrides?.model_override || '')}
+            className="btn-primary text-sm"
+          >
+            {overrideBusy ? <Loader2 size={12} className="animate-spin" /> : null}
+            {overrideModel ? 'Apply' : 'Clear'}
+          </button>
+          {overrides?.model_override && (
+            <button onClick={clearOverride} disabled={overrideBusy} className="btn-ghost text-sm">
+              Clear
+            </button>
+          )}
+        </div>
       </Section>
 
       {/* ── Agent model assignment ────────────────────────── */}

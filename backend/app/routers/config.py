@@ -113,6 +113,35 @@ async def all_models(current_user: CurrentUser):
     return result
 
 
+# ── Global model override ─────────────────────────────────────────────────────
+
+class ModelOverrideRequest(BaseModel):
+    model: str | None  # null/empty clears the override
+
+
+@router.get("/overrides")
+async def get_overrides(current_user: CurrentUser):
+    """Return any active app-wide overrides (currently just model_override)."""
+    from app.services import app_settings
+    return {"model_override": await app_settings.get("model_override")}
+
+
+@router.put("/overrides/model")
+async def set_model_override(body: ModelOverrideRequest, current_user: CurrentUser):
+    """Set or clear the global model override.
+
+    When set, every agent call (librarian chat, ingestion, digests, monitor
+    suggestions) uses this model regardless of per-project settings.
+    """
+    from app.services import app_settings
+    m = (body.model or "").strip() or None
+    if m:
+        await app_settings.set_value("model_override", m)
+    else:
+        await app_settings.delete("model_override")
+    return {"model_override": m}
+
+
 # ── API key health check ──────────────────────────────────────────────────────
 
 class KeyTestRequest(BaseModel):
