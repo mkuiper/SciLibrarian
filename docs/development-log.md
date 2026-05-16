@@ -294,6 +294,22 @@ A chronological record of what was built each cycle and key decisions made along
 
 ---
 
+## Cycle 14.1 — 2026-05-16 — Restructure resilience for small models
+
+Followup to Cycle 14 after live testing with the Ollama gemma override. The new structured-actions prompt is much heavier than the old free-text one (four action schemas, ID constraints, nested examples), and `_parse_json` was strict — when gemma produced almost-but-not-quite-valid JSON, the request 500'd and the UI showed a generic "Analysis failed" toast.
+
+Three things changed (`services/project_setup.py`, `pages/RestructurePage.jsx`):
+
+1. **Graceful parse failure.** `_parse_json` is renamed to `_try_parse_json` and returns `None` instead of raising. `suggest_restructure` catches both `complete_text` exceptions and parse failures, returning `{summary: explanation, actions: [], error: true, raw_excerpt: first 300 chars}` so the UI can show what actually happened.
+
+2. **Tighter prompt for smaller models.** Reformatted to put strict-format instructions first, replaced abstract `<id>` placeholders with concrete realistic JSON in the action examples (smaller models sometimes echo placeholder syntax literally), and bumped `max_tokens` from 2000 to 2500 to leave room for the JSON envelope. `json.dumps()` calls dropped the `indent=2` to save context.
+
+3. **UI for the error path.** RestructurePage previously had two end-states (actions list or "well organised" empty state). Added a third: when `error: true`, render an amber-bordered card explaining the model returned malformed output, with a collapsible details element showing the raw excerpt. Recommends switching to a larger model on the Configuration page.
+
+The failure mode is fundamentally a small-model JSON-reliability problem rather than a bug in our code — even with the tightened prompt, sub-10B local models will sometimes produce malformed output for a 4-shape schema. The fix is to make that case visible and actionable instead of a 500.
+
+---
+
 ## Cycle 14 — 2026-05-16 — Applyable Restructure Actions
 
 ### Why this cycle

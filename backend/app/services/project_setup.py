@@ -4,11 +4,15 @@ When a project is created, Alexandria analyses the description and goals
 to suggest an initial collection taxonomy and watch queries.
 """
 import json
+import logging
 import re
 from app.services.llm import complete_text
 
+logger = logging.getLogger(__name__)
 
-def _parse_json(raw: str) -> dict:
+
+def _try_parse_json(raw: str) -> dict | None:
+    """Best-effort JSON extraction. Returns None instead of raising on failure."""
     raw = raw.strip()
     if "```" in raw:
         parts = raw.split("```")
@@ -22,17 +26,24 @@ def _parse_json(raw: str) -> dict:
     start, end = raw.find("{"), raw.rfind("}") + 1
     if start != -1 and end > start:
         raw = raw[start:end]
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        pass
-    fixed = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', raw)
-    try:
-        return json.loads(fixed)
-    except json.JSONDecodeError:
-        pass
-    fixed2 = re.sub(r',\s*([}\]])', r'\1', fixed)
-    return json.loads(fixed2)
+    for repair in (
+        lambda s: s,
+        lambda s: re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', s),
+        lambda s: re.sub(r',\s*([}\]])', r'\1', re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', s)),
+    ):
+        try:
+            return json.loads(repair(raw))
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _parse_json(raw: str) -> dict:
+    """Strict variant — raises on failure. Used by setup paths where partial output is unusable."""
+    parsed = _try_parse_json(raw)
+    if parsed is None:
+        raise json.JSONDecodeError("could not parse JSON after repair attempts", raw, 0)
+    return parsed
 
 
 async def generate_initial_structure(
@@ -88,57 +99,72 @@ async def suggest_restructure(
     Returns:
         {summary, actions: [...]} where each action is a dict with `type` and
         type-specific fields referencing real collection / reference IDs.
-        Callers must validate IDs against the project before applying.
+
+    Designed to degrade gracefully on smaller models (Ollama gemma, llama):
+    if the model produces unparseable output we return an empty actions list
+    with a helpful summary instead of raising, so the UI can show the user
+    what happened rather than a generic 500.
     """
-    prompt = f"""You are Alexandria, the research librarian for {project_name}.
+    prompt = f"""You are Alexandria, librarian for "{project_name}". Output ONLY a JSON object — no markdown fences, no preamble, no commentary.
 
-CURRENT COLLECTIONS (id, name, description, parent_id, ref_count):
-{json.dumps(current_collections, indent=2)}
+COLLECTIONS (each has id, name, description, parent_id, ref_count):
+{json.dumps(current_collections)}
 
-RECENT REFERENCES (id, title, tags, current collection_id, year):
-{json.dumps(recent_references, indent=2)}
+RECENT REFERENCES (each has id, title, tags, collection_id, year):
+{json.dumps(recent_references)}
 
-Propose concrete, executable restructure actions. Every action MUST reference real
-IDs from the data above — do not invent IDs. Prefer 3-6 high-signal actions over
-many low-impact ones. If the library is well-organised, return an empty actions list.
+Propose 0-6 concrete restructure actions. Every id in your output MUST appear in the data above. Empty actions array is fine if the library is well-organised.
 
-Action types and required fields:
+Schema:
+{{
+  "summary": "1-2 sentence overall assessment",
+  "actions": [ /* zero or more action objects, each ONE of the four shapes below */ ]
+}}
 
-1. create_collection — make a new collection, optionally populated immediately
-   {{"type": "create_collection", "name": "...", "description": "...",
-     "parent_id": <id or null>, "populate_with_reference_ids": [<ids>],
-     "priority": "high|medium|low", "reasoning": "why this helps"}}
-
-2. rename_collection — change name/description of an existing collection
-   {{"type": "rename_collection", "collection_id": <id>,
-     "new_name": "...", "new_description": "..." (or null to keep),
-     "priority": "...", "reasoning": "..."}}
-
-3. move_references — move refs into an existing collection
-   {{"type": "move_references", "reference_ids": [<ids>],
-     "target_collection_id": <id>,
-     "priority": "...", "reasoning": "..."}}
-
-4. merge_collections — move all refs from source to target, then delete source
-   {{"type": "merge_collections", "source_collection_id": <id>,
-     "target_collection_id": <id>,
-     "priority": "...", "reasoning": "..."}}
+Action shapes (use real ids):
+{{"type":"create_collection","name":"AI Alignment","description":"Papers on alignment techniques","parent_id":null,"populate_with_reference_ids":[12,19,23],"priority":"high","reasoning":"3 recent papers tagged 'alignment' have no home collection"}}
+{{"type":"rename_collection","collection_id":5,"new_name":"Foundation Models","new_description":"Large pretrained models","priority":"medium","reasoning":"current name doesn't reflect what's actually in here"}}
+{{"type":"move_references","reference_ids":[12,19],"target_collection_id":8,"priority":"high","reasoning":"both papers are about RLHF but currently uncategorised"}}
+{{"type":"merge_collections","source_collection_id":12,"target_collection_id":5,"priority":"medium","reasoning":"both contain interpretability papers and the smaller collection only has 2 refs"}}
 
 Rules:
-- Use the real IDs shown above. If you can't justify a move with a real ref ID, drop it.
-- A reference's "tags" field is a strong signal — group by tag patterns.
-- Don't propose merging a collection that has sub-collections (children) — that case is unsafe.
-- Keep `reasoning` to one short sentence. Specific is better than general.
+- Use real ids from the data above. Drop the action if you can't.
+- Prefer specific reasoning over generic ("groups RLHF papers" beats "improves organisation").
+- Don't merge a collection that has sub-collections — the system will reject it anyway.
 
-Return JSON only (no markdown fences):
-{{
-  "summary": "Brief overall assessment (1-2 sentences)",
-  "actions": [ ... ]
-}}"""
+Return the JSON object now."""
 
-    raw = await complete_text(model, prompt, max_tokens=2000)
-    parsed = _parse_json(raw)
+    try:
+        raw = await complete_text(model, prompt, max_tokens=2500)
+    except Exception as e:
+        logger.warning(f"suggest_restructure: model {model} call failed: {e}")
+        return {
+            "summary": f"The model ({model}) couldn't complete the analysis: {str(e)[:200]}. Try switching to a more capable model from the Configuration page.",
+            "actions": [],
+            "error": True,
+        }
+
+    parsed = _try_parse_json(raw)
+    if parsed is None:
+        logger.warning(
+            f"suggest_restructure: couldn't parse JSON from {model}. "
+            f"First 400 chars of response: {raw[:400]!r}"
+        )
+        return {
+            "summary": (
+                f"Alexandria's reply (from {model}) wasn't valid JSON. "
+                "This often happens with smaller local models — try a more capable model "
+                "(e.g. Claude or a larger Ollama like gemma4:31b or qwen3.6:35b) on the Configuration page."
+            ),
+            "actions": [],
+            "error": True,
+            "raw_excerpt": raw[:300],
+        }
+
     if "actions" not in parsed:
         # Tolerate legacy `recommendations` key from earlier prompt versions
         parsed["actions"] = parsed.pop("recommendations", [])
+    if not isinstance(parsed.get("actions"), list):
+        parsed["actions"] = []
+    parsed.setdefault("summary", "")
     return parsed

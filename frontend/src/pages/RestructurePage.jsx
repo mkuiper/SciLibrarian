@@ -226,6 +226,22 @@ export default function RestructurePage() {
                 />
               ))}
             </div>
+          ) : result.error ? (
+            <div className="card border-l-4 border-amber-300 p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle size={18} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm text-gray-700 font-medium mb-1">Couldn't parse the model's response</p>
+                  <p className="text-xs text-gray-500">{result.summary}</p>
+                  {result.raw_excerpt && (
+                    <details className="mt-3">
+                      <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">View model output</summary>
+                      <pre className="mt-2 text-xs bg-gray-50 p-2 rounded font-mono whitespace-pre-wrap text-gray-600">{result.raw_excerpt}</pre>
+                    </details>
+                  )}
+                </div>
+              </div>
+            </div>
           ) : (
             <div className="text-center py-8 text-gray-400">
               <p>Alexandria found no restructuring actions — your library looks well organised.</p>
