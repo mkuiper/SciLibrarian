@@ -18,6 +18,7 @@ class ReviewQueueItemOut(BaseModel):
     doi: Optional[str] = None
     arxiv_id: Optional[str] = None
     extra_metadata: Optional[dict[str, Any]]
+    rejection_reason: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

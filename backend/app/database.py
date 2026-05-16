@@ -69,6 +69,8 @@ _MIGRATIONS = [
     ' value JSONB NOT NULL,'
     ' updated_at TIMESTAMPTZ NOT NULL DEFAULT now()'
     ')',
+    # Cycle 17: Optional rejection reason on review queue items — feeds monitor learning
+    'ALTER TABLE review_queue ADD COLUMN IF NOT EXISTS rejection_reason TEXT',
 ]
 
 

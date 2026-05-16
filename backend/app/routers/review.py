@@ -24,6 +24,7 @@ class ReviewDecision(BaseModel):
     collection_id: Optional[int] = None
     model: str = ""                      # model for full ingestion (empty = use project default)
     full_ingest: bool = True             # whether to run full ingestion pipeline on approve
+    rejection_reason: Optional[str] = None  # optional free-text on reject; fed into monitor learning
 
 
 @router.get("/queue", response_model=list[ReviewQueueItemOut])
@@ -62,6 +63,8 @@ async def decide(item_id: int, decision: ReviewDecision, db: DB, current_user: C
         item.status = "approved"
     elif decision.action == "reject":
         item.status = "rejected"
+        if decision.rejection_reason:
+            item.rejection_reason = decision.rejection_reason.strip()[:1000] or None
     else:
         raise HTTPException(status_code=400, detail="action must be 'approve' or 'reject'")
 

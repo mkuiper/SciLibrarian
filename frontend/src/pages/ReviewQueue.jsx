@@ -15,11 +15,28 @@ const STATUS_TABS = [
 function QueueItem({ item, onDecide, collections, fullIngest }) {
   const [loading, setLoading] = useState(false)
   const [targetCollection, setTargetCollection] = useState('')
+  const [showRejectReason, setShowRejectReason] = useState(false)
+  const [rejectionReason, setRejectionReason] = useState('')
 
-  const decide = async (action) => {
+  const decide = async (action, reason = null) => {
     setLoading(action)
-    await onDecide(item.id, action, targetCollection ? parseInt(targetCollection) : null, fullIngest)
-    setLoading(false)
+    try {
+      await onDecide(item.id, action, targetCollection ? parseInt(targetCollection) : null, fullIngest, reason)
+      setShowRejectReason(false)
+      setRejectionReason('')
+    } finally {
+      // Always reset — otherwise a network error leaves the button spinning indefinitely
+      setLoading(false)
+    }
+  }
+
+  const handleRejectClick = (e) => {
+    // Shift-click skips the reason prompt for fast rejection
+    if (e.shiftKey) {
+      decide('reject', null)
+    } else {
+      setShowRejectReason(true)
+    }
   }
 
   return (
@@ -73,10 +90,10 @@ function QueueItem({ item, onDecide, collections, fullIngest }) {
                 )}
               </button>
               <button
-                onClick={() => decide('reject')}
+                onClick={handleRejectClick}
                 disabled={!!loading}
                 className="w-9 h-9 flex items-center justify-center rounded-lg bg-red-50 text-red-400 hover:bg-red-100 transition-colors disabled:opacity-50"
-                title="Reject"
+                title="Reject (shift-click to skip reason prompt)"
               >
                 {loading === 'reject' ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
               </button>
@@ -86,6 +103,51 @@ function QueueItem({ item, onDecide, collections, fullIngest }) {
           {item.status === 'rejected' && <span className="badge bg-red-50 text-red-400 text-xs">rejected</span>}
         </div>
       </div>
+
+      {showRejectReason && item.status === 'pending' && (
+        <div className="mt-3 pt-3 border-t border-gray-100">
+          <label className="text-xs text-gray-500 block mb-1.5">
+            Why reject? <span className="text-gray-400">(optional — helps Alexandria refine the monitor)</span>
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              autoFocus
+              value={rejectionReason}
+              onChange={e => setRejectionReason(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') decide('reject', rejectionReason.trim() || null)
+                if (e.key === 'Escape') { setShowRejectReason(false); setRejectionReason('') }
+              }}
+              placeholder='e.g. "off-topic — pharma not AI", "duplicate of existing ref"'
+              className="input text-xs flex-1"
+              maxLength={500}
+            />
+            <button
+              onClick={() => decide('reject', rejectionReason.trim() || null)}
+              disabled={!!loading}
+              className="btn-secondary text-xs"
+            >
+              {loading === 'reject' ? <Loader2 size={12} className="animate-spin" /> : 'Reject'}
+            </button>
+            <button
+              onClick={() => { setShowRejectReason(false); setRejectionReason('') }}
+              disabled={!!loading}
+              className="btn-ghost text-xs"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {item.status === 'rejected' && item.rejection_reason && (
+        <div className="mt-2 pt-2 border-t border-gray-50">
+          <p className="text-xs text-gray-500 italic">
+            <span className="text-gray-400">Reason:</span> {item.rejection_reason}
+          </p>
+        </div>
+      )}
     </div>
   )
 }
@@ -107,12 +169,13 @@ export default function ReviewQueue() {
     queryFn: () => collectionsApi.list(projectId).then(r => r.data),
   })
 
-  const handleDecide = async (itemId, action, collectionId = null, doFullIngest = true) => {
+  const handleDecide = async (itemId, action, collectionId = null, doFullIngest = true, rejectionReason = null) => {
     try {
       await reviewApi.decide(itemId, {
         action,
         collection_id: collectionId,
         full_ingest: doFullIngest && action === 'approve',
+        rejection_reason: rejectionReason || undefined,
       })
       queryClient.invalidateQueries({ queryKey: ['review-queue'] })
       queryClient.invalidateQueries({ queryKey: ['ref-stats'] })

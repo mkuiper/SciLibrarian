@@ -601,10 +601,17 @@ async def suggest_monitor_improvements(
         }
 
     def sample(item):
-        return {"title": item.title, "abstract": (item.abstract or "")[:300]}
+        return {
+            "title": item.title,
+            "abstract": (item.abstract or "")[:300],
+            "reason": (getattr(item, "rejection_reason", None) or "").strip(),
+        }
 
     approved_samples = [sample(i) for i in approved]
     rejected_samples = [sample(i) for i in rejected]
+
+    def _rejected_line(r):
+        return f"- {r['title']}" + (f"  (reason: {r['reason']})" if r['reason'] else "")
 
     prompt = f"""You are tuning a literature search monitor for a researcher.
 
@@ -615,10 +622,10 @@ Existing negative keywords: {monitor.negative_keywords or '(none)'}
 APPROVED items (researcher kept these):
 {chr(10).join(f"- {a['title']}" for a in approved_samples) or '(none yet)'}
 
-REJECTED items (researcher discarded these):
-{chr(10).join(f"- {r['title']}" for r in rejected_samples) or '(none yet)'}
+REJECTED items (researcher discarded these — when a reason is given, weight it heavily):
+{chr(10).join(_rejected_line(r) for r in rejected_samples) or '(none yet)'}
 
-Suggest a query refinement and negative-keyword list that would surface more items like the approved ones and fewer like the rejected ones.
+Suggest a query refinement and negative-keyword list that would surface more items like the approved ones and fewer like the rejected ones. When rejection reasons are present, use them to identify the specific patterns the researcher wants to exclude.
 
 Rules:
 - Keep the refined query close to the original — don't change the core topic.

@@ -18,6 +18,24 @@ If any cycle uncovers something that wants more time, I'll slow down rather than
 
 ## Cycle log
 
+### Cycle 17 — Optional rejection reasons → monitor learning — ✅ done
+
+**Built:** new `rejection_reason TEXT` column on `review_queue`. The `ReviewDecision` schema accepts an optional reason and the `decide` endpoint persists it (strip + truncate to 1000 chars). The Cycle 12 monitor-improvement prompt in `suggest_monitor_improvements` now renders rejected items as `- title  (reason: ...)` when a reason is present, with an explicit instruction to weight reasons heavily. Frontend `QueueItem` opens an inline reason input on Reject; shift-click skips the prompt for fast rejection; Enter to submit, Escape to cancel. Rejected items in the history view display the reason in italics under the card body.
+
+**Critical review** (Gemini + Claude in parallel) — first cycle this run where the reviewers strongly disagreed.
+
+Gemini flagged five issues; on cross-check four were false positives:
+- "ReviewDecision missing action field" — FALSE. The action field is still present; Gemini hallucinated.
+- "strip()[:1000] or None whitespace logic broken" — FALSE. Walked through: whitespace input becomes `""` after strip, then `"" or None` correctly returns None. Correct as written.
+- "Empty string leaves old reason in place" — TRUE technically but out of UI scope (the input only appears on pending items, can't reject the same item twice).
+- "getattr on item could fail if item is a dict" — FALSE. Items come from `.scalars().all()` which yields ORM instances, not dicts.
+
+The one real bug Gemini did find: **loading state is never reset in a finally** in the `decide()` handler. If `onDecide` throws (network error mid-request) the spinner gets stuck forever. Fixed by wrapping the await in try/finally. Pre-existing pattern in the same file but worth fixing while I was here.
+
+Claude found no real bugs and explicitly confirmed several design choices were correct (the `or None` fallback, the shift-click pattern, the 5th-param default not breaking callers). Verdict for tonight: Claude was the more reliable reviewer, but Gemini's false positives took ~5 min to disprove rather than just trusting either blindly. Running both is still the right call — the one real bug Gemini caught would have shipped otherwise.
+
+---
+
 ### Cycle 16 — Ollama diagnostics panel — ✅ done
 
 **Built:** `GET /config/ollama/diagnostics` that probes the configured URL + four common alternatives (`host.docker.internal`, `172.17.0.1`, `localhost`, `ollama:11434`) in parallel, measures latency, fetches `/api/ps` and `/api/tags` from whichever URL responds, and returns categorised remediation. Frontend gets a Diagnose button next to the existing Test button on the Ollama section, with a collapsible result panel showing per-URL probe status, currently-loaded models with VRAM size, and remediation steps.
