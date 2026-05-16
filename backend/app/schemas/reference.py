@@ -49,6 +49,8 @@ class ReferenceOut(BaseModel):
     is_starred: bool = False
     read_status: str = "unread"
     notes: Optional[str] = None
+    doi: Optional[str] = None
+    arxiv_id: Optional[str] = None
     created_by: int
     created_at: datetime
     updated_at: datetime

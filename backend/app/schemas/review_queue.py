@@ -15,6 +15,8 @@ class ReviewQueueItemOut(BaseModel):
     abstract: Optional[str]
     authors: Optional[str]
     year: Optional[int]
+    doi: Optional[str] = None
+    arxiv_id: Optional[str] = None
     extra_metadata: Optional[dict[str, Any]]
     created_at: datetime
 

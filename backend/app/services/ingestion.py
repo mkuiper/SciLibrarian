@@ -90,6 +90,43 @@ ARXIV_PDF  = re.compile(r'https?://arxiv\.org/pdf/(\d{4}\.\d{4,5}(?:v\d+)?)(?:\.
 DOI_URL    = re.compile(r'https?://(?:dx\.)?doi\.org/(.+)')
 
 
+def normalise_doi(raw: str | None) -> str | None:
+    if not raw or not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    for prefix in ("https://doi.org/", "http://doi.org/", "https://dx.doi.org/", "http://dx.doi.org/", "doi:", "DOI:"):
+        if s.lower().startswith(prefix.lower()):
+            s = s[len(prefix):]
+            break
+    s = s.rstrip("/").lower()
+    return s if s.startswith("10.") else None
+
+
+def normalise_arxiv_id(raw: str | None) -> str | None:
+    if not raw or not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    for prefix in ("https://arxiv.org/abs/", "http://arxiv.org/abs/", "https://arxiv.org/pdf/", "http://arxiv.org/pdf/", "arxiv:", "arXiv:"):
+        if s.lower().startswith(prefix.lower()):
+            s = s[len(prefix):]
+            break
+    s = s.rstrip("/").removesuffix(".pdf")
+    return s.lower() if re.fullmatch(r"\d{4}\.\d{4,5}(v\d+)?", s) else None
+
+
+def extract_ids_from_url(url: str | None) -> tuple[str | None, str | None]:
+    """Return (doi, arxiv_id) parsed from a URL, when recognisable."""
+    if not url:
+        return None, None
+    m = ARXIV_ABS.match(url) or ARXIV_PDF.match(url)
+    if m:
+        return None, normalise_arxiv_id(m.group(1))
+    m = DOI_URL.match(url)
+    if m:
+        return normalise_doi(m.group(1)), None
+    return None, None
+
+
 def _arxiv_pdf_url(arxiv_id: str) -> str:
     return f"https://arxiv.org/pdf/{arxiv_id}"
 
@@ -153,6 +190,15 @@ Return JSON with these fields:
         extra = meta.setdefault("extra_metadata", {}) or {}
         extra["findings"] = findings
         meta["extra_metadata"] = extra
+
+    # Lift DOI / arXiv ID from LLM-generated extra_metadata into top-level fields
+    extra = meta.get("extra_metadata") or {}
+    doi = normalise_doi(extra.get("doi"))
+    arxiv_id = normalise_arxiv_id(extra.get("arxiv_id"))
+    if doi:
+        meta["doi"] = doi
+    if arxiv_id:
+        meta["arxiv_id"] = arxiv_id
 
     return meta
 
@@ -231,6 +277,15 @@ async def ingest_url(url: str, model: str = "claude-sonnet-4-6") -> dict:
     - DOI URLs → resolve and try PDF
     - Everything else → HTML scraping
     """
+    url_doi, url_arxiv_id = extract_ids_from_url(url)
+
+    def _apply_url_ids(meta: dict) -> dict:
+        if url_doi and not meta.get("doi"):
+            meta["doi"] = url_doi
+        if url_arxiv_id and not meta.get("arxiv_id"):
+            meta["arxiv_id"] = url_arxiv_id
+        return meta
+
     # ── arXiv abstract page ──────────────────────────────────────────────────
     m = ARXIV_ABS.match(url)
     if m:
@@ -238,12 +293,12 @@ async def ingest_url(url: str, model: str = "claude-sonnet-4-6") -> dict:
         pdf_url = _arxiv_pdf_url(arxiv_id)
         meta = await _ingest_pdf_bytes_from_url(pdf_url, f"arxiv_{arxiv_id}.pdf", url, model)
         if meta:
-            return meta
+            return _apply_url_ids(meta)
         # Fall back to abstract page scraping
         title, text = await extract_url_text(url)
         meta = await generate_metadata(text, title, model)
         meta.update(url=url, full_text=text)
-        return {k: _clean(v) for k, v in meta.items()}
+        return _apply_url_ids({k: _clean(v) for k, v in meta.items()})
 
     # ── arXiv PDF URL ────────────────────────────────────────────────────────
     m = ARXIV_PDF.match(url)
@@ -252,7 +307,7 @@ async def ingest_url(url: str, model: str = "claude-sonnet-4-6") -> dict:
         canonical = f"https://arxiv.org/abs/{arxiv_id}"
         meta = await _ingest_pdf_bytes_from_url(url, f"arxiv_{arxiv_id}.pdf", canonical, model)
         if meta:
-            return meta
+            return _apply_url_ids(meta)
 
     # ── Any URL that ends with .pdf or responds with PDF content-type ────────
     if url.lower().endswith(".pdf") or "/pdf/" in url.lower():
@@ -261,7 +316,7 @@ async def ingest_url(url: str, model: str = "claude-sonnet-4-6") -> dict:
             fname += ".pdf"
         meta = await _ingest_pdf_bytes_from_url(url, fname, url, model)
         if meta:
-            return meta
+            return _apply_url_ids(meta)
 
     # ── Try fetching: if it turns out to be a PDF, route to PDF pipeline ─────
     try:
@@ -272,7 +327,7 @@ async def ingest_url(url: str, model: str = "claude-sonnet-4-6") -> dict:
                 fname += ".pdf"
             meta = await ingest_pdf(resp.content, fname, model)
             meta["url"] = url
-            return meta
+            return _apply_url_ids(meta)
         # It's HTML — parse it
         soup = BeautifulSoup(resp.text, "lxml")
         for tag in soup(["script", "style", "nav", "footer", "header"]):
@@ -284,6 +339,6 @@ async def ingest_url(url: str, model: str = "claude-sonnet-4-6") -> dict:
 
     meta = await generate_metadata(text, title, model)
     meta.update(url=url, full_text=text)
-    return {k: _clean(v) for k, v in meta.items()}
+    return _apply_url_ids({k: _clean(v) for k, v in meta.items()})
 
 

@@ -173,6 +173,16 @@ These are all planned for future cycles.
 
 ---
 
+## DOI / arXiv ID as first-class indexed columns
+
+**Decision (Cycle 10):** Promote `doi` and `arxiv_id` out of `extra_metadata` into nullable indexed columns on `references` and `review_queue`. Check them ahead of URL / title in every dedup path.
+
+**Rationale:** With monitors pulling from arXiv, Semantic Scholar, OpenAlex (and sometimes a direct URL upload), the same paper arrives with completely different URLs and slightly different titles. DOI and arXiv ID are stable identifiers — when present, they're the cheapest and most reliable dedup signal. Indexing them as columns (composite with `project_id`) makes the dedup query a single index probe, vs. unsearchable JSON inside `extra_metadata`. The other practical change: the DOI normalisation rules (strip prefixes, lowercase, require `10.` prefix) only need to live in one place so source adapters and LLM-extracted metadata both produce identical strings.
+
+**Limitation:** Many references will still have neither (websites, blog posts, model cards). The dedup chain falls through to URL and title for those, so the behaviour for non-academic sources is unchanged. Cross-project dedup is intentionally not done — a paper can legitimately exist in two projects (matches prior Cycle 8 decision).
+
+---
+
 ## Authentication: JWT, no refresh tokens yet
 
 **Decision:** Simple JWT with 24-hour expiry. No refresh token flow in Cycle 1.

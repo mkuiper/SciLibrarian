@@ -21,6 +21,8 @@ class ReviewQueueItem(Base):
     authors: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     extra_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    doi: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    arxiv_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     reviewed_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     collection_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("collections.id"), nullable=True)

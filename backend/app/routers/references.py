@@ -19,10 +19,29 @@ from app.services import ingestion
 router = APIRouter(prefix="/references", tags=["references"])
 
 
-async def _find_duplicate(db, url: str | None, title: str, project_id: int | None) -> Reference | None:
-    """Return an existing Reference if URL or normalised title matches within the same project."""
+async def _find_duplicate(
+    db,
+    url: str | None,
+    title: str,
+    project_id: int | None,
+    doi: str | None = None,
+    arxiv_id: str | None = None,
+) -> Reference | None:
+    """Return an existing Reference matching DOI, arXiv ID, URL, or normalised title within the same project."""
     from sqlalchemy import or_
     scope = [Reference.project_id == project_id] if project_id else []
+
+    if doi:
+        stmt = select(Reference).where(Reference.doi == doi, *scope)
+        existing = (await db.execute(stmt)).scalar_one_or_none()
+        if existing:
+            return existing
+
+    if arxiv_id:
+        stmt = select(Reference).where(Reference.arxiv_id == arxiv_id, *scope)
+        existing = (await db.execute(stmt)).scalar_one_or_none()
+        if existing:
+            return existing
 
     if url:
         norm = url.rstrip('/')
@@ -88,7 +107,14 @@ async def upload_file(
     project_id = await _resolve_project_id(db, collection_id, project_id)
     meta = await ingestion.ingest_file(content, file.filename, model)
 
-    existing = await _find_duplicate(db, meta.get("url"), meta.get("title", file.filename), project_id)
+    existing = await _find_duplicate(
+        db,
+        meta.get("url"),
+        meta.get("title", file.filename),
+        project_id,
+        doi=meta.get("doi"),
+        arxiv_id=meta.get("arxiv_id"),
+    )
     if existing:
         result = await db.execute(select(Reference).options(selectinload(Reference.tags)).where(Reference.id == existing.id))
         raise HTTPException(status_code=409, detail={"message": "Duplicate reference", "existing_id": existing.id, "existing_title": existing.title})
@@ -104,6 +130,8 @@ async def upload_file(
         file_path=meta.get("file_path"),
         file_name=meta.get("file_name"),
         full_text=meta.get("full_text"),
+        doi=meta.get("doi"),
+        arxiv_id=meta.get("arxiv_id"),
         collection_id=collection_id,
         project_id=project_id,
         created_by=current_user.id,
@@ -133,15 +161,19 @@ async def ingest_from_url(
 ):
     project_id = await _resolve_project_id(db, collection_id, project_id)
 
-    # Quick URL dedup before paying for ingestion
-    url_dup = await _find_duplicate(db, url, "", project_id)
+    # Quick URL + ID dedup before paying for ingestion
+    url_doi, url_arxiv_id = ingestion.extract_ids_from_url(url)
+    url_dup = await _find_duplicate(db, url, "", project_id, doi=url_doi, arxiv_id=url_arxiv_id)
     if url_dup:
         raise HTTPException(status_code=409, detail={"message": "Duplicate reference", "existing_id": url_dup.id, "existing_title": url_dup.title})
 
     meta = await ingestion.ingest_url(url, model)
 
-    # Title dedup after ingestion
-    title_dup = await _find_duplicate(db, None, meta.get("title", url), project_id)
+    # Post-ingestion dedup: now we may have a DOI/arxiv_id the URL alone didn't reveal
+    title_dup = await _find_duplicate(
+        db, None, meta.get("title", url), project_id,
+        doi=meta.get("doi"), arxiv_id=meta.get("arxiv_id"),
+    )
     if title_dup:
         raise HTTPException(status_code=409, detail={"message": "Duplicate reference", "existing_id": title_dup.id, "existing_title": title_dup.title})
 
@@ -154,6 +186,8 @@ async def ingest_from_url(
         summary=meta.get("summary"),
         url=url,
         full_text=meta.get("full_text"),
+        doi=meta.get("doi"),
+        arxiv_id=meta.get("arxiv_id"),
         collection_id=collection_id,
         project_id=project_id,
         created_by=current_user.id,
@@ -357,6 +391,8 @@ async def _ingest_pdf_and_save(
         file_path=meta.get("file_path"),
         file_name=meta.get("file_name"),
         full_text=meta.get("full_text"),
+        doi=meta.get("doi"),
+        arxiv_id=meta.get("arxiv_id"),
         collection_id=collection_id,
         project_id=project_id,
         created_by=user_id,
@@ -500,6 +536,8 @@ async def from_urls_bulk(data: BulkUrlRequest, db: DB, current_user: CurrentUser
                 summary=meta.get("summary"),
                 url=url,
                 full_text=meta.get("full_text"),
+                doi=meta.get("doi"),
+                arxiv_id=meta.get("arxiv_id"),
                 collection_id=data.collection_id,
                 project_id=project_id,
                 created_by=current_user.id,
@@ -546,10 +584,14 @@ def _to_bibtex(ref: Reference) -> str:
     ]
     if ref.url:
         lines.append(f'  url = {{{ref.url}}},')
-    if ref.extra_metadata:
-        if ref.extra_metadata.get("doi"):
-            lines.append(f'  doi = {{{ref.extra_metadata["doi"]}}},')
-        if ref.extra_metadata.get("journal"):
-            lines.append(f'  journal = {{{ref.extra_metadata["journal"]}}},')
+    if ref.doi:
+        lines.append(f'  doi = {{{ref.doi}}},')
+    elif ref.extra_metadata and ref.extra_metadata.get("doi"):
+        lines.append(f'  doi = {{{ref.extra_metadata["doi"]}}},')
+    if ref.arxiv_id:
+        lines.append(f'  eprint = {{{ref.arxiv_id}}},')
+        lines.append(f'  archivePrefix = {{arXiv}},')
+    if ref.extra_metadata and ref.extra_metadata.get("journal"):
+        lines.append(f'  journal = {{{ref.extra_metadata["journal"]}}},')
     lines.append("}")
     return "\n".join(lines)

@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.search_monitor import SearchMonitor
 from app.models.review_queue import ReviewQueueItem
+from app.services.ingestion import extract_ids_from_url, normalise_doi, normalise_arxiv_id
 
 logger = logging.getLogger(__name__)
 
@@ -65,13 +66,16 @@ async def search_arxiv(query: str, max_results: int = 10) -> list[dict]:
                 year = int(published_el.text[:4])
             except ValueError:
                 pass
+        link = (link_el.text or "").strip()
+        _, arxiv_id = extract_ids_from_url(link)
         results.append({
             "title": (title_el.text or "").strip(),
             "abstract": (summary_el.text or "").strip(),
             "authors": ", ".join(authors),
             "year": year,
-            "url": (link_el.text or "").strip(),
+            "url": link,
             "source": "arxiv",
+            "arxiv_id": arxiv_id,
         })
     return results
 
@@ -97,7 +101,9 @@ async def search_semantic_scholar(query: str, max_results: int = 10) -> list[dic
         pdf_url = None
         if paper.get("openAccessPdf"):
             pdf_url = paper["openAccessPdf"].get("url")
-        doi = (paper.get("externalIds") or {}).get("DOI")
+        ext = paper.get("externalIds") or {}
+        doi = normalise_doi(ext.get("DOI"))
+        arxiv_id = normalise_arxiv_id(ext.get("ArXiv"))
         url_out = pdf_url or (f"https://doi.org/{doi}" if doi else None)
         results.append({
             "title": paper.get("title", ""),
@@ -106,6 +112,8 @@ async def search_semantic_scholar(query: str, max_results: int = 10) -> list[dic
             "year": paper.get("year"),
             "url": url_out,
             "source": "semantic_scholar",
+            "doi": doi,
+            "arxiv_id": arxiv_id,
         })
     return results
 
@@ -146,9 +154,10 @@ async def search_openalex(query: str, max_results: int = 10) -> list[dict]:
             for a in (work.get("authorships") or [])[:5]
         )
 
-        doi = work.get("doi", "")
+        doi_raw = work.get("doi", "")
+        doi = normalise_doi(doi_raw)
         oa_url = (work.get("open_access") or {}).get("oa_url")
-        url_out = oa_url or (doi if doi.startswith("http") else f"https://doi.org/{doi.lstrip('https://doi.org/')}" if doi else None)
+        url_out = oa_url or (doi_raw if doi_raw and doi_raw.startswith("http") else (f"https://doi.org/{doi}" if doi else None))
 
         results.append({
             "title": title,
@@ -157,6 +166,7 @@ async def search_openalex(query: str, max_results: int = 10) -> list[dict]:
             "year": work.get("publication_year"),
             "url": url_out,
             "source": "openalex",
+            "doi": doi,
             "extra_metadata": {"openalex_id": work.get("id"), "doi": doi},
         })
     return results
@@ -405,15 +415,37 @@ Return the JSON array only, e.g. [0, 2, 5]. Return all indices if most results a
     return results
 
 
-async def _is_duplicate(db: AsyncSession, title: str, url: str | None) -> bool:
+async def _is_duplicate(
+    db: AsyncSession,
+    title: str,
+    url: str | None,
+    doi: str | None = None,
+    arxiv_id: str | None = None,
+) -> bool:
     """
     Check if this item is already in the library or the pending queue.
-    Matches on URL (exact) or normalised title (case-insensitive, stripped).
+    Matches on DOI, arXiv ID, URL, or normalised title.
     """
     from app.models.reference import Reference
     from sqlalchemy import func
 
     norm_title = title.strip().lower()
+
+    if doi:
+        if (await db.execute(select(Reference).where(Reference.doi == doi))).scalar_one_or_none():
+            return True
+        if (await db.execute(
+            select(ReviewQueueItem).where(ReviewQueueItem.doi == doi, ReviewQueueItem.status == "pending")
+        )).scalar_one_or_none():
+            return True
+
+    if arxiv_id:
+        if (await db.execute(select(Reference).where(Reference.arxiv_id == arxiv_id))).scalar_one_or_none():
+            return True
+        if (await db.execute(
+            select(ReviewQueueItem).where(ReviewQueueItem.arxiv_id == arxiv_id, ReviewQueueItem.status == "pending")
+        )).scalar_one_or_none():
+            return True
 
     if url:
         existing_ref = await db.execute(select(Reference).where(Reference.url == url))
@@ -487,7 +519,13 @@ async def run_monitor(db: AsyncSession, monitor: SearchMonitor, model: str | Non
     for item in relevant:
         if not item.get("title"):
             continue
-        if await _is_duplicate(db, item["title"], item.get("url")):
+        item_doi = normalise_doi(item.get("doi"))
+        item_arxiv = normalise_arxiv_id(item.get("arxiv_id"))
+        if not item_doi or not item_arxiv:
+            url_doi, url_arxiv = extract_ids_from_url(item.get("url"))
+            item_doi = item_doi or url_doi
+            item_arxiv = item_arxiv or url_arxiv
+        if await _is_duplicate(db, item["title"], item.get("url"), doi=item_doi, arxiv_id=item_arxiv):
             skipped_duplicates += 1
             continue
         db.add(ReviewQueueItem(
@@ -500,6 +538,8 @@ async def run_monitor(db: AsyncSession, monitor: SearchMonitor, model: str | Non
             abstract=item.get("abstract"),
             authors=item.get("authors"),
             year=item.get("year"),
+            doi=item_doi,
+            arxiv_id=item_arxiv,
             status="pending",
             extra_metadata=item.get("extra_metadata"),
         ))

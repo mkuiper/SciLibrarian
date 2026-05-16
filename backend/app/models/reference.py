@@ -24,6 +24,8 @@ class Reference(Base):
     is_starred: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     read_status: Mapped[str] = mapped_column(String(20), default="unread", server_default="unread")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    doi: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    arxiv_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -39,6 +41,8 @@ class Reference(Base):
         Index("ix_references_collection_id", "collection_id"),
         Index("ix_references_source_type", "source_type"),
         Index("ix_references_year", "year"),
+        Index("ix_references_doi_project", "project_id", "doi"),
+        Index("ix_references_arxiv_project", "project_id", "arxiv_id"),
     )
 
 

@@ -294,6 +294,38 @@ A chronological record of what was built each cycle and key decisions made along
 
 ---
 
+## Cycle 10 — 2026-05-16 — DOI / arXiv ID Deduplication
+
+**Goal:** Stop the same paper from arriving multiple times through different monitor sources (arXiv + Semantic Scholar + OpenAlex). The previous URL+title checks were too brittle — OpenAlex returns DOI URLs, arXiv returns abstract page URLs, and Semantic Scholar sometimes returns the PDF URL, so URL-equality misses them and small title variations slip past the title check.
+
+### Schema (`models/reference.py`, `models/review_queue.py`, `database.py`)
+- New nullable columns `doi VARCHAR(200)` and `arxiv_id VARCHAR(50)` on both `references` and `review_queue`
+- Composite indexes `(project_id, doi)` and `(project_id, arxiv_id)` on `references` for fast project-scoped lookup
+- Migrations are guarded with `IF NOT EXISTS` and run on backend startup
+
+### ID extraction at ingestion (`services/ingestion.py`)
+- New helpers `normalise_doi`, `normalise_arxiv_id`, `extract_ids_from_url`
+- DOI normalised to lowercase `10.x/yyy` form (strips `https://doi.org/`, `doi:`, etc.); rejects non-DOI strings
+- arXiv ID normalised to `YYMM.NNNNN` or `YYMM.NNNNNvN` form
+- `generate_metadata` lifts `doi` / `arxiv_id` from LLM-generated `extra_metadata` into top-level meta fields
+- `ingest_url` applies URL-derived IDs as a fallback when LLM extraction missed them
+
+### ID surfacing in source adapters (`services/proactive_search.py`)
+- arXiv: parses ID from the entry's `<id>` URL via `extract_ids_from_url`
+- Semantic Scholar: reads `externalIds.DOI` and `externalIds.ArXiv`, normalises both
+- OpenAlex: normalises the `doi` field (was previously kept only inside `extra_metadata`)
+
+### Dedup wiring (`routers/references.py`, `routers/review.py`, `services/proactive_search.py`)
+- `_find_duplicate(...)` now takes `doi` and `arxiv_id` and checks them before URL / title
+- Upload, from-URL, bulk PDF, bulk URL, and review-queue approval all read `doi` / `arxiv_id` from the ingestion meta and persist them
+- `_is_duplicate` in `proactive_search` checks `Reference.doi` / `arxiv_id` and `ReviewQueueItem.doi` / `arxiv_id` so the same paper from multiple monitor sources is rejected at queue intake
+- BibTeX export now uses the column directly (with `eprint` + `archivePrefix` for arXiv entries) and falls back to `extra_metadata` for legacy rows
+
+### Schemas (`schemas/reference.py`, `schemas/review_queue.py`)
+- `ReferenceOut` and `ReviewQueueItemOut` expose `doi` and `arxiv_id` so the frontend can render them on detail pages later
+
+---
+
 ## Planned: Future Cycles
 
 See `docs/feature-requests.md` for the authoritative roadmap with phase completion status. The most pressing remaining items, in priority order:

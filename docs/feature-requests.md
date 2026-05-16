@@ -227,7 +227,7 @@ semantics. Until then, backend scoping should be conservative and clear.
 - ✅ PostgreSQL FTS with `to_tsvector` / `plainto_tsquery`, GIN index, weighted ranking, `ts_headline` snippets
 - ✅ Server-side filters: year range, tag, source type, read status, starred
 - ✅ Deduplication at ingestion: URL and normalised title checks, 409 with existing_id on duplicate
-- ⬜ DOI / arXiv ID as indexed columns for stronger dedup (still open)
+- ✅ DOI / arXiv ID as indexed columns for stronger dedup (Cycle 10) — extracted from URLs, source adapters, and LLM-generated metadata; checked at reference create, bulk paths, and monitor queue intake
 - ⬜ Server-side pagination in the Library list view (currently fetches up to 200)
 
 ### Phase 3: Research Synthesis — ✅ Largely Complete
@@ -269,7 +269,9 @@ semantics. Until then, backend scoping should be conservative and clear.
 The most impactful remaining work, in priority order:
 
 1. **Project access enforcement** on direct reference endpoints (security gap noted by Codex review)
-2. **DOI / arXiv ID deduplication** — add indexed columns, check at monitor queue and ingestion
+2. ~~**DOI / arXiv ID deduplication**~~ — ✅ shipped in Cycle 10
 3. **Server-side Library pagination** — current 200-ref cap will become a problem as libraries grow
-4. **Monitor learning from review decisions** — summarise why recent rejections were off-target, suggest query refinements
-5. **Project membership and roles** — prerequisite for all team workflow features
+4. **Full-text quote search** — extend FTS GIN index to cover `extracted_text` so "where did I read X" works
+5. **Cross-reference comparison view** — UI to compare findings/method/limitations across 2-4 selected refs
+6. **Monitor learning from review decisions** — summarise why recent rejections were off-target, suggest query refinements
+7. **Project membership and roles** — prerequisite for all team workflow features

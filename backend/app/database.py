@@ -44,6 +44,13 @@ _MIGRATIONS = [
     # Round 8: Monitor quality metrics
     'ALTER TABLE search_monitors ADD COLUMN IF NOT EXISTS approve_count INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE search_monitors ADD COLUMN IF NOT EXISTS reject_count INTEGER NOT NULL DEFAULT 0',
+    # Cycle 10: DOI / arXiv ID columns for stronger deduplication
+    'ALTER TABLE "references" ADD COLUMN IF NOT EXISTS doi VARCHAR(200)',
+    'ALTER TABLE "references" ADD COLUMN IF NOT EXISTS arxiv_id VARCHAR(50)',
+    'CREATE INDEX IF NOT EXISTS ix_references_doi_project ON "references" (project_id, doi)',
+    'CREATE INDEX IF NOT EXISTS ix_references_arxiv_project ON "references" (project_id, arxiv_id)',
+    'ALTER TABLE review_queue ADD COLUMN IF NOT EXISTS doi VARCHAR(200)',
+    'ALTER TABLE review_queue ADD COLUMN IF NOT EXISTS arxiv_id VARCHAR(50)',
 ]
 
 
