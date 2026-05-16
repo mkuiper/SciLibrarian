@@ -108,6 +108,7 @@ export const configApi = {
   testKey: (provider, key = '') => api.post('/config/test-key', { provider, key }),
   systemStatus: () => api.get('/config/system'),
   schedulerControl: (action) => api.post(`/config/scheduler/${action}`),
+  ollamaDiagnostics: () => api.get('/config/ollama/diagnostics', { timeout: 30000 }),
   getOverrides: () => api.get('/config/overrides'),
   setModelOverride: (model) => api.put('/config/overrides/model', { model }),
   allModels: () => api.get('/config/models'),

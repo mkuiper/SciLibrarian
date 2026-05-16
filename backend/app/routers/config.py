@@ -90,6 +90,126 @@ async def ollama_models_endpoint(current_user: CurrentUser, refresh: bool = Fals
     }
 
 
+@router.get("/ollama/diagnostics")
+async def ollama_diagnostics(current_user: CurrentUser):
+    """Comprehensive Ollama reachability + state probe.
+
+    Tries the configured URL plus a fixed list of common alternatives, measures
+    latency, fetches currently-loaded models (/api/ps) and installed models
+    (/api/tags). Returns categorised remediation when nothing responds.
+
+    Probes run in parallel so worst-case latency is ~3s (one timeout) not 15s.
+    """
+    import asyncio
+
+    candidates = [settings.ollama_base_url]
+    for alt in (
+        "http://host.docker.internal:11434",
+        "http://172.17.0.1:11434",
+        "http://localhost:11434",
+        "http://ollama:11434",
+    ):
+        if alt not in candidates:
+            candidates.append(alt)
+
+    async def _probe(url: str) -> dict:
+        t0 = time.perf_counter()
+        result = {"url": url, "reachable": False, "latency_ms": None, "error": None, "version": None}
+        try:
+            async with httpx.AsyncClient(timeout=3) as client:
+                resp = await client.get(f"{url}/api/version")
+                result["latency_ms"] = int((time.perf_counter() - t0) * 1000)
+                if resp.status_code == 200:
+                    result["reachable"] = True
+                    try:
+                        result["version"] = resp.json().get("version")
+                    except Exception:
+                        pass
+                else:
+                    result["error"] = f"HTTP {resp.status_code}"
+        except httpx.ConnectError:
+            result["error"] = "connection refused / no route"
+        except httpx.ReadTimeout:
+            result["error"] = "timeout after 3s"
+        except Exception as e:
+            result["error"] = f"{e.__class__.__name__}: {str(e)[:80]}"
+        return result
+
+    probes = await asyncio.gather(*[_probe(u) for u in candidates])
+    # Pick the first reachable URL deterministically (preserving candidates order — configured URL first)
+    any_reachable = next((p["url"] for p in probes if p["reachable"]), None)
+
+    # Fetch live state from whichever URL works. Critically: use any_reachable,
+    # not settings.ollama_base_url — when configured is dead but a fallback works,
+    # the user needs to see what's actually installed, not an empty list.
+    loaded_models = []
+    installed_models = []
+    if any_reachable:
+        async with httpx.AsyncClient(timeout=5) as client:
+            try:
+                resp = await client.get(f"{any_reachable}/api/ps")
+                if resp.status_code == 200:
+                    for m in resp.json().get("models", []):
+                        raw_size = m.get("size_vram") or m.get("size") or 0
+                        loaded_models.append({
+                            "name": m.get("name"),
+                            "size_mb": round(raw_size / (1024 * 1024)) if raw_size else None,
+                            "expires_at": m.get("expires_at"),
+                        })
+            except Exception as e:
+                logger.debug(f"/api/ps probe failed: {e}")
+            try:
+                resp = await client.get(f"{any_reachable}/api/tags")
+                if resp.status_code == 200:
+                    for m in resp.json().get("models", []):
+                        installed_models.append({"name": m.get("name"), "supports_tools": None})
+            except Exception as e:
+                logger.debug(f"/api/tags fetch from {any_reachable} failed: {e}")
+
+    # Build categorised remediation guidance based on what we saw
+    remediation = []
+    configured_url = settings.ollama_base_url
+    configured_reachable = any(p["reachable"] and p["url"] == configured_url for p in probes)
+    if not any_reachable:
+        remediation.append({
+            "title": "No Ollama instance is reachable",
+            "steps": [
+                "Check that Ollama is running: `systemctl status ollama` on the host",
+                "If installed via systemd, ensure it's bound to 0.0.0.0 so containers can reach it:",
+                "  sudo mkdir -p /etc/systemd/system/ollama.service.d",
+                "  echo -e '[Service]\\nEnvironment=\"OLLAMA_HOST=0.0.0.0:11434\"' | sudo tee /etc/systemd/system/ollama.service.d/override.conf",
+                "  sudo systemctl daemon-reload && sudo systemctl restart ollama",
+                "If running inside Docker, start with: docker-compose --profile ollama up",
+            ],
+        })
+    elif not configured_reachable:
+        remediation.append({
+            "title": f"Configured OLLAMA_BASE_URL ({configured_url}) is not responding, but Ollama IS reachable at {any_reachable}",
+            "steps": [
+                f"Update .env: OLLAMA_BASE_URL={any_reachable}",
+                "Restart the backend container: docker-compose restart backend",
+            ],
+        })
+    elif loaded_models == []:
+        remediation.append({
+            "title": "Ollama is reachable but no model is currently loaded",
+            "steps": [
+                "Models load on first chat request — this isn't necessarily a problem",
+                "If responses are slow, pre-load with: `ollama run <model> ''` from the host",
+            ],
+        })
+
+    return {
+        "configured_url": configured_url,
+        "any_reachable": any_reachable,
+        "probes": probes,
+        "loaded_models": loaded_models,
+        "installed_count": len(installed_models),
+        "installed_models": installed_models,
+        "remediation": remediation,
+    }
+
+
 @router.get("/models")
 async def all_models(current_user: CurrentUser):
     """

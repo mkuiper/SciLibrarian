@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { configApi, librarianApi, projectsApi } from '../api/client'
 import {
   CheckCircle, XCircle, Loader2, RefreshCw, Server, Mail, Save,
-  Database, HardDrive, Clock, Play, Pause, Zap, AlertCircle,
+  Database, HardDrive, Clock, Play, Pause, Zap, AlertCircle, X,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow, format } from 'date-fns'
@@ -223,6 +223,19 @@ export default function ConfigPage() {
   }, [overrides?.model_override])
 
   const [overrideBusy, setOverrideBusy] = useState(false)
+  const [diagnostics, setDiagnostics] = useState(null)
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false)
+  const runOllamaDiagnostics = async () => {
+    setDiagnosticsLoading(true)
+    try {
+      const { data } = await configApi.ollamaDiagnostics()
+      setDiagnostics(data)
+    } catch {
+      toast.error('Diagnostics failed')
+    } finally {
+      setDiagnosticsLoading(false)
+    }
+  }
   const applyOverride = async () => {
     setOverrideBusy(true)
     try {
@@ -406,7 +419,57 @@ export default function ConfigPage() {
           <button onClick={() => refetchOllama()} className="ml-auto btn-ghost text-xs gap-1">
             <RefreshCw size={11} />Test
           </button>
+          <button onClick={() => runOllamaDiagnostics()} disabled={diagnosticsLoading} className="btn-ghost text-xs gap-1">
+            {diagnosticsLoading ? <Loader2 size={11} className="animate-spin" /> : null}
+            Diagnose
+          </button>
         </div>
+
+        {diagnostics && (
+          <div className="bg-gray-50 border border-gray-100 rounded-xl p-3 mb-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-gray-600">Diagnostics — probed {diagnostics.probes?.length} URL(s)</p>
+              <button onClick={() => setDiagnostics(null)} className="text-gray-300 hover:text-gray-600"><X size={12} /></button>
+            </div>
+            <ul className="space-y-1">
+              {diagnostics.probes?.map(p => (
+                <li key={p.url} className="text-xs flex items-center gap-2 font-mono">
+                  <StatusDot ok={p.reachable} />
+                  <span className="flex-1 break-all">{p.url}</span>
+                  {p.reachable
+                    ? <span className="text-emerald-600">{p.latency_ms}ms{p.version ? ` · v${p.version}` : ''}</span>
+                    : <span className="text-red-400">{p.error || 'unreachable'}</span>}
+                </li>
+              ))}
+            </ul>
+            {diagnostics.loaded_models?.length > 0 && (
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Currently loaded in GPU:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {diagnostics.loaded_models.map(m => (
+                    <span key={m.name} className="badge bg-blue-50 text-blue-700 text-xs">
+                      {m.name} <span className="opacity-60 ml-1">{m.size_mb} MB</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {diagnostics.remediation?.length > 0 && (
+              <div className="bg-amber-50 border border-amber-100 rounded-lg p-2.5">
+                {diagnostics.remediation.map((r, i) => (
+                  <div key={i}>
+                    <p className="text-xs font-semibold text-amber-800 mb-1">{r.title}</p>
+                    <ol className="text-xs text-amber-700 list-decimal list-inside space-y-0.5">
+                      {r.steps.map((s, j) => (
+                        <li key={j} className="font-mono whitespace-pre-wrap">{s}</li>
+                      ))}
+                    </ol>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {ollamaInfo?.connected && allOllamaModels.length > 0 && (
           <div className="bg-gray-50 rounded-xl p-3 mb-4">
