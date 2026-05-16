@@ -208,7 +208,15 @@ async def restructure_suggestions(project_id: int, db: DB, current_user: Current
         for r in raw_refs
     ]
 
-    suggested = await suggest_restructure(project.name, collections_for_prompt, refs_for_prompt)
+    # Use the project's configured librarian model (a global override on top of
+    # that is applied inside complete_text via effective_model).
+    from app.config import settings as app_settings
+    project_settings = project.settings or {}
+    model = project_settings.get("librarian_model") or app_settings.default_librarian_model
+
+    suggested = await suggest_restructure(
+        project.name, collections_for_prompt, refs_for_prompt, model=model,
+    )
     actions_in = suggested.get("actions") or []
 
     # Resolve IDs and validate every action — anything pointing at an unknown

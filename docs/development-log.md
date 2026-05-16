@@ -294,6 +294,17 @@ A chronological record of what was built each cycle and key decisions made along
 
 ---
 
+## Cycle 14.2 — 2026-05-16 — Restructure honours the configured model
+
+Found while testing: even with a global model override active for librarian chat, restructure analysis kept hitting `claude-sonnet-4-6`. Two layers of the same bug:
+
+1. `suggest_restructure(...)` had a hardcoded default `model="claude-sonnet-4-6"` and the endpoint didn't pass a model.
+2. The endpoint never read `project.settings.librarian_model` even though other paths (`scheduler.py:58`, `email_ingest.py:70`, `generate_initial_structure`) already do.
+
+Fixed both — `suggest_restructure` now defaults to `settings.default_librarian_model` when no model is passed, and the endpoint resolves the model from project settings before calling. The global override (Cycle 13) still applies on top via `effective_model()` inside `complete_text`, so the chain is now: project setting → global override → Anthropic-API fallback.
+
+---
+
 ## Cycle 14.1 — 2026-05-16 — Restructure resilience for small models
 
 Followup to Cycle 14 after live testing with the Ollama gemma override. The new structured-actions prompt is much heavier than the old free-text one (four action schemas, ID constraints, nested examples), and `_parse_json` was strict — when gemma produced almost-but-not-quite-valid JSON, the request 500'd and the UI showed a generic "Analysis failed" toast.

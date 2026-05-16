@@ -92,9 +92,15 @@ async def suggest_restructure(
     project_name: str,
     current_collections: list[dict],
     recent_references: list[dict],
-    model: str = "claude-sonnet-4-6",
+    model: str | None = None,
 ) -> dict:
     """Ask Alexandria for structured, executable restructure actions.
+
+    Args:
+        model: explicit model name. If None, falls back to settings.default_librarian_model.
+            Callers should pass the project's librarian_model setting (see the
+            endpoint in routers/projects.py); a global override on top of that
+            is handled inside complete_text via effective_model().
 
     Returns:
         {summary, actions: [...]} where each action is a dict with `type` and
@@ -105,6 +111,8 @@ async def suggest_restructure(
     with a helpful summary instead of raising, so the UI can show the user
     what happened rather than a generic 500.
     """
+    from app.config import settings
+    model = model or settings.default_librarian_model
     prompt = f"""You are Alexandria, librarian for "{project_name}". Output ONLY a JSON object — no markdown fences, no preamble, no commentary.
 
 COLLECTIONS (each has id, name, description, parent_id, ref_count):
