@@ -246,7 +246,10 @@ export default function RestructurePage() {
               <li key={entry.id} className="flex items-start justify-between gap-3 text-sm border-b border-gray-50 pb-2 last:border-0">
                 <div className="flex-1 min-w-0">
                   <p className="text-gray-700">{formatLogEntry(entry)}</p>
-                  <p className="text-xs text-gray-400 mt-0.5 capitalize">{entry.action_type.replace(/_/g, ' ')}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    <span className="capitalize">{entry.action_type.replace(/_/g, ' ')}</span>
+                    {entry.username && <span className="ml-2">· by <span className="font-medium">{entry.username}</span></span>}
+                  </p>
                 </div>
                 <span className="text-xs text-gray-400 flex-shrink-0">
                   {formatDistanceToNow(new Date(entry.applied_at), { addSuffix: true })}

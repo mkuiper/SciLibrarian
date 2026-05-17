@@ -18,6 +18,18 @@ If any cycle uncovers something that wants more time, I'll slow down rather than
 
 ## Cycle log
 
+### Cycle 22 — Librarian chat access + audit log usernames — ✅ done
+
+Two small Cycle 18/19 follow-ups bundled:
+
+1. **`/librarian/chat` now enforces project access.** The endpoint takes a `project_id` in the request body but didn't validate it — any authenticated user could read library content + custom system prompts from another user's project just by changing the body field. Now calls `require_project_access` when `project_id` is set. Legitimate single-user case is unaffected because `useProject()` only resolves to projects the user owns (Cycle 19 filtered `list_projects`).
+
+2. **Restructure audit log shows usernames.** Was already exposing `user_id` but the UI rendered numeric ids. Joined `users` (LEFT JOIN so deleted users still produce a row with NULL username — the frontend conditionally renders "· by <username>" so the "·" doesn't orphan). Endpoint result and UI both updated.
+
+Claude reviewed solo for this one (small enough not to burn a second-reviewer pass). No real bugs found. One side note: the new librarian-chat access check raises 404 where the old code silently no-op'd on a stale project_id — but `useProject()` re-resolves against the live filtered project list, so no legitimate caller can hit it.
+
+---
+
 ### Cycle 21 — Semantic search (no pgvector yet) — ✅ done
 
 **Decision up-front:** pgvector isn't available in the `postgres:16-alpine` image the project uses. Probed with `pg_available_extensions` first. Swapping to `pgvector/pgvector:pg16` overnight without supervision felt risky (DB container restart, volume migration). Pivoted to a **soft semantic search**: embeddings stored as JSONB float arrays, Python-side cosine. Correct at current scale (hundreds of refs), and the migration path to pgvector is a one-function-rewrite of `similarity_search` once the image moves.

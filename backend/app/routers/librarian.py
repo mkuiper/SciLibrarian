@@ -1,10 +1,9 @@
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
 
 from app.dependencies import DB, CurrentUser
-from app.models.project import Project
+from app.services.access import require_project_access
 from app.services.librarian import chat
 from app.services.llm import get_ollama_models, PROVIDER_MODELS
 
@@ -19,13 +18,19 @@ class ChatRequest(BaseModel):
 
 @router.post("/chat")
 async def chat_endpoint(request: ChatRequest, db: DB, current_user: CurrentUser):
+    """Stream a librarian-agent reply.
+
+    When project_id is supplied, the caller must own the project — otherwise
+    they could read library content + custom system prompts from another
+    user's project just by changing the body field. Closes a Cycle 19
+    follow-up noted in docs/overnight-log.md.
+    """
     system_prompt = None
     project_settings = None
 
-    if request.project_id:
-        result = await db.execute(select(Project).where(Project.id == request.project_id))
-        project = result.scalar_one_or_none()
-        if project and project.settings:
+    if request.project_id is not None:
+        project = await require_project_access(db, request.project_id, current_user.id)
+        if project.settings:
             system_prompt = project.settings.get("librarian_system_prompt")
             project_settings = project.settings
 

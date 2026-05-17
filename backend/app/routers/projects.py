@@ -445,7 +445,11 @@ async def restructure_log(
     project_id: int, db: DB, current_user: CurrentUser,
     limit: int = 20,
 ):
-    """Most recent applied restructure actions for this project, newest first."""
+    """Most recent applied restructure actions for this project, newest first.
+
+    Includes the acting user's username so the UI doesn't have to translate
+    numeric ids — addresses a Cycle 18 review note.
+    """
     from sqlalchemy import text as sa_text
 
     await require_project_access(db, project_id, current_user.id)
@@ -453,9 +457,12 @@ async def restructure_log(
     limit = max(1, min(100, int(limit)))
     rows = await db.execute(
         sa_text(
-            "SELECT id, user_id, action_type, action_payload, result, applied_at "
-            "FROM restructure_actions WHERE project_id = :p "
-            "ORDER BY applied_at DESC LIMIT :l"
+            "SELECT ra.id, ra.user_id, u.username, ra.action_type, "
+            "ra.action_payload, ra.result, ra.applied_at "
+            "FROM restructure_actions ra "
+            "LEFT JOIN users u ON u.id = ra.user_id "
+            "WHERE ra.project_id = :p "
+            "ORDER BY ra.applied_at DESC LIMIT :l"
         ),
         {"p": project_id, "l": limit},
     )
@@ -464,6 +471,7 @@ async def restructure_log(
         entries.append({
             "id": row["id"],
             "user_id": row["user_id"],
+            "username": row["username"],
             "action_type": row["action_type"],
             "payload": row["action_payload"],
             "result": row["result"],
