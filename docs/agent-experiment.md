@@ -175,7 +175,9 @@ This is non-optional for Gemini in `--yolo` mode. Claude in `--print` mode has b
 
 ### Codex CLI (`codex review --uncommitted`)
 
-Would be ideal — it's purpose-built for this and returns structured findings JSON. But its bwrap sandbox fails in this container environment (`RTM_NEWADDR: Operation not permitted`) and refuses to inspect the diff. Tried it on Cycles 15, 18, 20 — same failure every time. Until that sandbox issue clears upstream or Codex moves to a different isolation backend, falling back to Claude + Gemini on stdin is the working configuration.
+Would be ideal — it's purpose-built for this and returns structured findings JSON. Its bwrap sandbox failed on every attempt during Cycles 15, 18, 20 with `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` — same error even with `--dangerously-bypass-approvals-and-sandbox`.
+
+**Update (overnight Cycle 23 break):** the user noted they had another Codex instance running elsewhere during these cycles. That fits the failure mode exactly — bubblewrap's user-namespace isolation can collide with a concurrent session in the same uid space. Plan to retry on Cycle 24+ with the other instance shut down. If Codex works, it becomes the third reviewer in rotation (Claude + Gemini + Codex), and the structured findings JSON is much nicer to parse than Claude/Gemini's prose. Falling back to Claude + Gemini remains the safety net.
 
 ### Talley of overnight findings
 
