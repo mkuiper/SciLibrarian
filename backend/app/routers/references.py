@@ -15,6 +15,8 @@ from app.models.collection import Collection
 from app.models.reference import Reference, ReferenceTag
 from app.schemas.reference import ReferenceCreate, ReferenceUpdate, ReferenceOut
 from app.services import ingestion
+from app.services.access import require_reference_access, user_can_access_reference
+from app.models.project import Project as _Project
 
 router = APIRouter(prefix="/references", tags=["references"])
 
@@ -70,9 +72,20 @@ async def _resolve_project_id(
     db: DB,
     collection_id: Optional[int],
     project_id: Optional[int],
+    user_id: Optional[int] = None,
 ) -> Optional[int]:
-    """Keep references project-scoped even when callers only send collection_id."""
+    """Keep references project-scoped even when callers only send collection_id.
+
+    When user_id is supplied, the destination collection and resolved project
+    must both belong to that user — closes a Cycle 19 review finding where a
+    user could move their reference into another user's project by passing a
+    foreign collection_id.
+    """
     if collection_id is None:
+        if user_id is not None:
+            from app.services.access import user_can_access_project
+            if not await user_can_access_project(db, project_id, user_id):
+                raise HTTPException(status_code=404, detail="Project not found")
         return project_id
 
     result = await db.execute(select(Collection).where(Collection.id == collection_id))
@@ -81,7 +94,13 @@ async def _resolve_project_id(
         raise HTTPException(status_code=404, detail="Collection not found")
     if project_id is not None and collection.project_id != project_id:
         raise HTTPException(status_code=400, detail="Collection does not belong to the selected project")
-    return collection.project_id or project_id
+
+    resolved = collection.project_id or project_id
+    if user_id is not None:
+        from app.services.access import user_can_access_project
+        if not await user_can_access_project(db, resolved, user_id):
+            raise HTTPException(status_code=404, detail="Project not found")
+    return resolved
 
 
 @router.post("/upload", response_model=ReferenceOut, status_code=201)
@@ -104,7 +123,7 @@ async def upload_file(
     if len(content) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(status_code=413, detail=f"File too large (max {settings.max_upload_mb}MB)")
 
-    project_id = await _resolve_project_id(db, collection_id, project_id)
+    project_id = await _resolve_project_id(db, collection_id, project_id, user_id=current_user.id)
     meta = await ingestion.ingest_file(content, file.filename, model)
 
     existing = await _find_duplicate(
@@ -159,7 +178,7 @@ async def ingest_from_url(
     db: DB = None,
     current_user: CurrentUser = None,
 ):
-    project_id = await _resolve_project_id(db, collection_id, project_id)
+    project_id = await _resolve_project_id(db, collection_id, project_id, user_id=current_user.id)
 
     # Quick URL + ID dedup before paying for ingestion
     url_doi, url_arxiv_id = ingestion.extract_ids_from_url(url)
@@ -206,15 +225,30 @@ async def ingest_from_url(
     return result.scalar_one()
 
 
+def _user_scope_filter(user_id: int):
+    """Build a SQL expression: rows the user can see (own ref, or own project)."""
+    from sqlalchemy import or_
+    accessible_projects = select(_Project.id).where(_Project.created_by == user_id).scalar_subquery()
+    return or_(
+        Reference.created_by == user_id,
+        Reference.project_id.in_(accessible_projects),
+    )
+
+
 @router.get("/stats/summary")
 async def stats(db: DB, current_user: CurrentUser, project_id: Optional[int] = None):
-    """Aggregate counts for dashboard. Must be declared before /{ref_id} routes."""
-    stmt = select(func.count(Reference.id))
+    """Aggregate counts for dashboard. Must be declared before /{ref_id} routes.
+
+    Always scoped to references the current user can access — without this an
+    unscoped call returned counts across every user's data.
+    """
+    user_scope = _user_scope_filter(current_user.id)
+    stmt = select(func.count(Reference.id)).where(user_scope)
     if project_id:
         stmt = stmt.where(Reference.project_id == project_id)
     total = (await db.execute(stmt)).scalar_one()
 
-    by_type_stmt = select(Reference.source_type, func.count(Reference.id))
+    by_type_stmt = select(Reference.source_type, func.count(Reference.id)).where(user_scope)
     if project_id:
         by_type_stmt = by_type_stmt.where(Reference.project_id == project_id)
     by_type_rows = await db.execute(by_type_stmt.group_by(Reference.source_type))
@@ -234,7 +268,9 @@ async def list_references(
     limit: int = Query(50, le=500),
     offset: int = Query(0),
 ):
-    filters = []
+    # Always scope to references the current user can access — without this an
+    # unscoped call leaked rows across users.
+    filters = [_user_scope_filter(current_user.id)]
     if collection_id is not None:
         filters.append(Reference.collection_id == collection_id)
     if project_id is not None:
@@ -242,15 +278,11 @@ async def list_references(
     if source_type:
         filters.append(Reference.source_type == source_type)
 
-    count_stmt = select(func.count(Reference.id))
-    if filters:
-        count_stmt = count_stmt.where(*filters)
+    count_stmt = select(func.count(Reference.id)).where(*filters)
     total = (await db.execute(count_stmt)).scalar_one()
     response.headers["X-Total-Count"] = str(total)
 
-    stmt = select(Reference).options(selectinload(Reference.tags))
-    if filters:
-        stmt = stmt.where(*filters)
+    stmt = select(Reference).options(selectinload(Reference.tags)).where(*filters)
     stmt = stmt.order_by(Reference.created_at.desc()).offset(offset).limit(limit)
     result = await db.execute(stmt)
     return result.scalars().all()
@@ -277,28 +309,29 @@ async def batch_references(
     if project_id is not None:
         stmt = stmt.where(Reference.project_id == project_id)
     result = await db.execute(stmt)
-    refs = {r.id: r for r in result.scalars().all()}
-    return [refs[i] for i in id_list if i in refs]
+    fetched = result.scalars().all()
+
+    # Filter to refs the current user has access to. Out-of-scope IDs simply
+    # drop from the response — same shape as "id didn't exist", so existence
+    # of foreign refs isn't leaked.
+    accessible = {}
+    for r in fetched:
+        if await user_can_access_reference(db, r, current_user.id):
+            accessible[r.id] = r
+    return [accessible[i] for i in id_list if i in accessible]
 
 
 @router.get("/{ref_id}", response_model=ReferenceOut)
 async def get_reference(ref_id: int, db: DB, current_user: CurrentUser):
-    result = await db.execute(select(Reference).options(selectinload(Reference.tags)).where(Reference.id == ref_id))
-    ref = result.scalar_one_or_none()
-    if not ref:
-        raise HTTPException(status_code=404, detail="Reference not found")
-    return ref
+    return await require_reference_access(db, ref_id, current_user.id, load_tags=True)
 
 
 @router.patch("/{ref_id}", response_model=ReferenceOut)
 async def update_reference(ref_id: int, data: ReferenceUpdate, db: DB, current_user: CurrentUser):
-    result = await db.execute(select(Reference).options(selectinload(Reference.tags)).where(Reference.id == ref_id))
-    ref = result.scalar_one_or_none()
-    if not ref:
-        raise HTTPException(status_code=404, detail="Reference not found")
+    ref = await require_reference_access(db, ref_id, current_user.id, load_tags=True)
 
     if data.collection_id is not None:
-        ref.project_id = await _resolve_project_id(db, data.collection_id, ref.project_id)
+        ref.project_id = await _resolve_project_id(db, data.collection_id, ref.project_id, user_id=current_user.id)
 
     for field in ["title", "authors", "year", "source_type", "abstract", "summary",
                   "url", "collection_id", "notes", "read_status"]:
@@ -329,10 +362,7 @@ async def reprocess_reference(
     Useful for references added from the review queue that got empty text,
     or to regenerate summaries with a better model.
     """
-    result = await db.execute(select(Reference).options(selectinload(Reference.tags)).where(Reference.id == ref_id))
-    ref = result.scalar_one_or_none()
-    if not ref:
-        raise HTTPException(status_code=404, detail="Reference not found")
+    ref = await require_reference_access(db, ref_id, current_user.id, load_tags=True)
 
     meta = None
     if ref.file_path and Path(ref.file_path).exists():
@@ -372,10 +402,7 @@ async def reprocess_reference(
 
 @router.delete("/{ref_id}", status_code=204)
 async def delete_reference(ref_id: int, db: DB, current_user: CurrentUser):
-    result = await db.execute(select(Reference).where(Reference.id == ref_id))
-    ref = result.scalar_one_or_none()
-    if not ref:
-        raise HTTPException(status_code=404, detail="Reference not found")
+    ref = await require_reference_access(db, ref_id, current_user.id)
     await db.delete(ref)
 
 
@@ -388,19 +415,15 @@ async def reference_citations(ref_id: int, db: DB, current_user: CurrentUser):
     """
     from app.services.citations import fetch_citations
 
-    result = await db.execute(select(Reference).where(Reference.id == ref_id))
-    ref = result.scalar_one_or_none()
-    if not ref:
-        raise HTTPException(status_code=404, detail="Reference not found")
+    ref = await require_reference_access(db, ref_id, current_user.id)
     return await fetch_citations(db, ref)
 
 
 @router.get("/{ref_id}/file")
 async def serve_file(ref_id: int, db: DB, current_user: CurrentUser):
     """Serve the uploaded PDF file for in-browser viewing."""
-    result = await db.execute(select(Reference).where(Reference.id == ref_id))
-    ref = result.scalar_one_or_none()
-    if not ref or not ref.file_path:
+    ref = await require_reference_access(db, ref_id, current_user.id)
+    if not ref.file_path:
         raise HTTPException(status_code=404, detail="No file attached to this reference")
     path = Path(ref.file_path)
     if not path.exists():
@@ -416,10 +439,7 @@ async def serve_file(ref_id: int, db: DB, current_user: CurrentUser):
 @router.get("/{ref_id}/bibtex", response_class=PlainTextResponse)
 async def export_bibtex(ref_id: int, db: DB, current_user: CurrentUser):
     """Export reference as BibTeX."""
-    result = await db.execute(select(Reference).where(Reference.id == ref_id))
-    ref = result.scalar_one_or_none()
-    if not ref:
-        raise HTTPException(status_code=404, detail="Reference not found")
+    ref = await require_reference_access(db, ref_id, current_user.id)
     return _to_bibtex(ref)
 
 
@@ -430,7 +450,7 @@ async def _ingest_pdf_and_save(
     db, content: bytes, filename: str, model: str,
     collection_id: Optional[int], project_id: Optional[int], user_id: int,
 ) -> dict:
-    project_id = await _resolve_project_id(db, collection_id, project_id)
+    project_id = await _resolve_project_id(db, collection_id, project_id, user_id=user_id)
     meta = await ingestion.ingest_file(content, filename, model)
     ref = Reference(
         title=meta.get("title", filename),
@@ -552,7 +572,7 @@ async def from_urls_bulk(data: BulkUrlRequest, db: DB, current_user: CurrentUser
     if not urls:
         raise HTTPException(status_code=400, detail="No URLs provided")
 
-    project_id = await _resolve_project_id(db, data.collection_id, data.project_id)
+    project_id = await _resolve_project_id(db, data.collection_id, data.project_id, user_id=current_user.id)
 
     async def ingest_one(url: str) -> dict:
         try:

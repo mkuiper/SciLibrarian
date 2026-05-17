@@ -5,8 +5,10 @@ from sqlalchemy.orm import selectinload
 
 from app.dependencies import DB, CurrentUser
 from app.models.collection import Collection
+from app.models.project import Project
 from app.models.reference import Reference
 from app.schemas.collection import CollectionCreate, CollectionUpdate, CollectionOut
+from app.services.access import user_can_access_project, require_project_access
 
 router = APIRouter(prefix="/collections", tags=["collections"])
 
@@ -19,6 +21,27 @@ async def _count(db, collection_id: int) -> int:
     return (await db.execute(
         select(func.count(Reference.id)).where(Reference.collection_id == collection_id)
     )).scalar_one()
+
+
+async def _require_collection_access(db, collection_id: int, user_id: int) -> Collection:
+    """Fetch a collection and enforce project-ownership-based access.
+
+    Like require_reference_access, 404 covers both missing and foreign so
+    existence isn't leaked. Collections with no project_id are treated as
+    universally accessible (legacy data from before project scoping).
+    """
+    result = await db.execute(select(Collection).where(Collection.id == collection_id))
+    col = result.scalar_one_or_none()
+    if not col:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    if col.project_id is not None and not await user_can_access_project(db, col.project_id, user_id):
+        raise HTTPException(status_code=404, detail="Collection not found")
+    return col
+
+
+def _user_project_filter(user_id: int):
+    """Build a subquery returning project IDs the user can access."""
+    return select(Project.id).where(Project.created_by == user_id).scalar_subquery()
 
 
 def _col_to_out(col: Collection, ref_count: int = 0, children: list = None) -> CollectionOut:
@@ -43,13 +66,14 @@ async def create_collection(data: CollectionCreate, db: DB, current_user: Curren
     project_id = data.project_id
 
     if data.parent_id:
-        result = await db.execute(select(Collection).where(Collection.id == data.parent_id))
-        parent = result.scalar_one_or_none()
-        if not parent:
-            raise HTTPException(status_code=404, detail="Parent collection not found")
+        parent = await _require_collection_access(db, data.parent_id, current_user.id)
         parent_path = parent.path
         if not project_id:
             project_id = parent.project_id
+
+    # If a project_id is supplied (or derived from parent), enforce ownership.
+    if project_id is not None and not await user_can_access_project(db, project_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Project not found")
 
     col = Collection(
         name=data.name,
@@ -74,7 +98,11 @@ async def list_collections(
     current_user: CurrentUser,
     project_id: Optional[int] = Query(None),
 ):
-    stmt = select(Collection).order_by(Collection.path)
+    if project_id is not None:
+        # Verify ownership of the specific project being queried.
+        await require_project_access(db, project_id, current_user.id)
+    user_projects = _user_project_filter(current_user.id)
+    stmt = select(Collection).where(Collection.project_id.in_(user_projects)).order_by(Collection.path)
     if project_id:
         stmt = stmt.where(Collection.project_id == project_id)
     result = await db.execute(stmt)
@@ -92,7 +120,14 @@ async def get_collection_tree(
     current_user: CurrentUser,
     project_id: Optional[int] = Query(None),
 ):
-    stmt = select(Collection).where(Collection.parent_id == None).order_by(Collection.name)
+    if project_id is not None:
+        await require_project_access(db, project_id, current_user.id)
+    user_projects = _user_project_filter(current_user.id)
+    stmt = (
+        select(Collection)
+        .where(Collection.parent_id == None, Collection.project_id.in_(user_projects))
+        .order_by(Collection.name)
+    )
     if project_id:
         stmt = stmt.where(Collection.project_id == project_id)
     result = await db.execute(stmt)
@@ -111,20 +146,14 @@ async def get_collection_tree(
 
 @router.get("/{collection_id}", response_model=CollectionOut)
 async def get_collection(collection_id: int, db: DB, current_user: CurrentUser):
-    result = await db.execute(select(Collection).where(Collection.id == collection_id))
-    col = result.scalar_one_or_none()
-    if not col:
-        raise HTTPException(status_code=404, detail="Collection not found")
+    col = await _require_collection_access(db, collection_id, current_user.id)
     count = await _count(db, col.id)
     return _col_to_out(col, count)
 
 
 @router.patch("/{collection_id}", response_model=CollectionOut)
 async def update_collection(collection_id: int, data: CollectionUpdate, db: DB, current_user: CurrentUser):
-    result = await db.execute(select(Collection).where(Collection.id == collection_id))
-    col = result.scalar_one_or_none()
-    if not col:
-        raise HTTPException(status_code=404, detail="Collection not found")
+    col = await _require_collection_access(db, collection_id, current_user.id)
     for field in ["name", "description"]:
         val = getattr(data, field, None)
         if val is not None:
@@ -137,10 +166,7 @@ async def update_collection(collection_id: int, data: CollectionUpdate, db: DB, 
 
 @router.delete("/{collection_id}", status_code=204)
 async def delete_collection(collection_id: int, db: DB, current_user: CurrentUser):
-    result = await db.execute(select(Collection).where(Collection.id == collection_id))
-    col = result.scalar_one_or_none()
-    if not col:
-        raise HTTPException(status_code=404, detail="Collection not found")
+    col = await _require_collection_access(db, collection_id, current_user.id)
     await db.delete(col)
 
 
@@ -148,9 +174,7 @@ async def delete_collection(collection_id: int, db: DB, current_user: CurrentUse
 async def export_collection_bibtex(collection_id: int, db: DB, current_user: CurrentUser):
     from app.routers.references import _to_bibtex
 
-    col = (await db.execute(select(Collection).where(Collection.id == collection_id))).scalar_one_or_none()
-    if not col:
-        raise HTTPException(status_code=404, detail="Collection not found")
+    col = await _require_collection_access(db, collection_id, current_user.id)
 
     refs = (await db.execute(
         select(Reference)

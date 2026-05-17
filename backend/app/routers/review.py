@@ -11,6 +11,7 @@ from app.models.reference import Reference, ReferenceTag
 from app.models.search_monitor import SearchMonitor
 from app.schemas.review_queue import ReviewQueueItemOut
 from app.schemas.search_monitor import SearchMonitorCreate, SearchMonitorUpdate, SearchMonitorOut
+from app.services.access import user_can_access_project
 from app.services.proactive_search import run_monitor, suggest_monitor_improvements
 from app.config import settings
 
@@ -36,9 +37,17 @@ async def get_queue(
     limit: int = Query(100),
     offset: int = Query(0),
 ):
+    # Scope to projects the user owns. project_id is an optional further filter
+    # within that scope; without it we still avoid leaking other users' queues.
+    from app.models.project import Project
+    from sqlalchemy import or_ as _or_
+    user_projects = select(Project.id).where(Project.created_by == current_user.id).scalar_subquery()
     stmt = (
         select(ReviewQueueItem)
-        .where(ReviewQueueItem.status == status)
+        .where(
+            ReviewQueueItem.status == status,
+            _or_(ReviewQueueItem.project_id.in_(user_projects), ReviewQueueItem.project_id.is_(None)),
+        )
         .order_by(ReviewQueueItem.created_at.desc())
         .offset(offset)
         .limit(limit)
@@ -54,6 +63,10 @@ async def decide(item_id: int, decision: ReviewDecision, db: DB, current_user: C
     result = await db.execute(select(ReviewQueueItem).where(ReviewQueueItem.id == item_id))
     item = result.scalar_one_or_none()
     if not item:
+        raise HTTPException(status_code=404, detail="Queue item not found")
+    # Ownership: deciding on a queue item that belongs to a project you don't
+    # own would be a write into someone else's data.
+    if item.project_id is not None and not await user_can_access_project(db, item.project_id, current_user.id):
         raise HTTPException(status_code=404, detail="Queue item not found")
 
     if decision.action == "approve":

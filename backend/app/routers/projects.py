@@ -15,6 +15,7 @@ from app.schemas.project import (
 )
 from app.services.project_setup import generate_initial_structure, suggest_restructure
 from app.services.digest import generate_digest
+from app.services.access import require_project_access
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -99,7 +100,13 @@ async def create_project(data: ProjectCreate, db: DB, current_user: CurrentUser)
 
 @router.get("", response_model=list[ProjectOut])
 async def list_projects(db: DB, current_user: CurrentUser):
-    result = await db.execute(select(Project).order_by(Project.created_at.desc()))
+    # Scope to projects the current user created. Closes the standing gap
+    # noted in memory: list_projects used to return every project to any user.
+    result = await db.execute(
+        select(Project)
+        .where(Project.created_by == current_user.id)
+        .order_by(Project.created_at.desc())
+    )
     return result.scalars().all()
 
 
@@ -111,10 +118,7 @@ async def delete_project(project_id: int, db: DB, current_user: CurrentUser):
     from app.models.review_queue import ReviewQueueItem
     from sqlalchemy import delete as sql_delete
 
-    result = await db.execute(select(Project).where(Project.id == project_id))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await require_project_access(db, project_id, current_user.id)
 
     # Delete in dependency order
     # 1. Reference tags for refs in this project
@@ -135,19 +139,12 @@ async def delete_project(project_id: int, db: DB, current_user: CurrentUser):
 
 @router.get("/{project_id}", response_model=ProjectOut)
 async def get_project(project_id: int, db: DB, current_user: CurrentUser):
-    result = await db.execute(select(Project).where(Project.id == project_id))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return project
+    return await require_project_access(db, project_id, current_user.id)
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
 async def update_project(project_id: int, data: ProjectUpdate, db: DB, current_user: CurrentUser):
-    result = await db.execute(select(Project).where(Project.id == project_id))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await require_project_access(db, project_id, current_user.id)
     for field, val in data.model_dump(exclude_none=True).items():
         setattr(project, field, val)
     await db.flush()
@@ -157,10 +154,7 @@ async def update_project(project_id: int, data: ProjectUpdate, db: DB, current_u
 
 @router.post("/{project_id}/restructure-suggestions", response_model=dict)
 async def restructure_suggestions(project_id: int, db: DB, current_user: CurrentUser):
-    project_result = await db.execute(select(Project).where(Project.id == project_id))
-    project = project_result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await require_project_access(db, project_id, current_user.id)
 
     cols_result = await db.execute(select(Collection).where(Collection.project_id == project_id))
     raw_collections = cols_result.scalars().all()
@@ -316,9 +310,7 @@ async def apply_restructure_action(
     action = body.action
     atype = action.get("type")
 
-    project_result = await db.execute(select(Project).where(Project.id == project_id))
-    if project_result.scalar_one_or_none() is None:
-        raise HTTPException(404, "Project not found")
+    await require_project_access(db, project_id, current_user.id)
 
     async def _collection_in_project(cid: int) -> Collection | None:
         if cid is None:
@@ -456,9 +448,7 @@ async def restructure_log(
     """Most recent applied restructure actions for this project, newest first."""
     from sqlalchemy import text as sa_text
 
-    project_result = await db.execute(select(Project).where(Project.id == project_id))
-    if project_result.scalar_one_or_none() is None:
-        raise HTTPException(404, "Project not found")
+    await require_project_access(db, project_id, current_user.id)
 
     limit = max(1, min(100, int(limit)))
     rows = await db.execute(
@@ -484,6 +474,7 @@ async def restructure_log(
 
 @router.post("/{project_id}/digests", response_model=DigestOut, status_code=201)
 async def create_digest(project_id: int, data: DigestCreate, db: DB, current_user: CurrentUser):
+    await require_project_access(db, project_id, current_user.id)
     digest = await generate_digest(
         db=db,
         project_id=project_id,
@@ -509,6 +500,7 @@ async def create_digest(project_id: int, data: DigestCreate, db: DB, current_use
 
 @router.get("/{project_id}/digests", response_model=list[DigestOut])
 async def list_digests(project_id: int, db: DB, current_user: CurrentUser):
+    await require_project_access(db, project_id, current_user.id)
     result = await db.execute(
         select(Digest)
         .where(Digest.project_id == project_id)
@@ -519,6 +511,7 @@ async def list_digests(project_id: int, db: DB, current_user: CurrentUser):
 
 @router.get("/{project_id}/digests/{digest_id}", response_model=DigestOut)
 async def get_digest(project_id: int, digest_id: int, db: DB, current_user: CurrentUser):
+    await require_project_access(db, project_id, current_user.id)
     result = await db.execute(
         select(Digest).where(Digest.project_id == project_id, Digest.id == digest_id)
     )
@@ -530,6 +523,7 @@ async def get_digest(project_id: int, digest_id: int, db: DB, current_user: Curr
 
 @router.delete("/{project_id}/digests/{digest_id}", status_code=204)
 async def delete_digest(project_id: int, digest_id: int, db: DB, current_user: CurrentUser):
+    await require_project_access(db, project_id, current_user.id)
     result = await db.execute(
         select(Digest).where(Digest.project_id == project_id, Digest.id == digest_id)
     )
@@ -542,6 +536,7 @@ async def delete_digest(project_id: int, digest_id: int, db: DB, current_user: C
 @router.get("/{project_id}/radar", response_model=dict)
 async def project_radar(project_id: int, db: DB, current_user: CurrentUser):
     """Return a situational briefing: recent additions, emerging tags, queue and monitor state."""
+    await require_project_access(db, project_id, current_user.id)
     from datetime import timedelta
     from sqlalchemy import func, desc
     from app.models.reference import Reference, ReferenceTag
@@ -607,6 +602,7 @@ async def project_radar(project_id: int, db: DB, current_user: CurrentUser):
 
 @router.post("/{project_id}/watch-requests", response_model=WatchRequestOut, status_code=201)
 async def create_watch_request(project_id: int, data: WatchRequestCreate, db: DB, current_user: CurrentUser):
+    await require_project_access(db, project_id, current_user.id)
     req = WatchRequest(
         project_id=project_id,
         user_id=current_user.id,
@@ -636,6 +632,7 @@ async def create_watch_request(project_id: int, data: WatchRequestCreate, db: DB
 
 @router.get("/{project_id}/watch-requests", response_model=list[WatchRequestOut])
 async def list_watch_requests(project_id: int, db: DB, current_user: CurrentUser):
+    await require_project_access(db, project_id, current_user.id)
     result = await db.execute(
         select(WatchRequest)
         .where(WatchRequest.project_id == project_id)
@@ -646,6 +643,7 @@ async def list_watch_requests(project_id: int, db: DB, current_user: CurrentUser
 
 @router.delete("/{project_id}/watch-requests/{req_id}", status_code=204)
 async def delete_watch_request(project_id: int, req_id: int, db: DB, current_user: CurrentUser):
+    await require_project_access(db, project_id, current_user.id)
     result = await db.execute(
         select(WatchRequest).where(WatchRequest.id == req_id, WatchRequest.project_id == project_id)
     )
@@ -672,10 +670,7 @@ async def update_project_settings(
     project_id: int, data: ProjectSettingsUpdate, db: DB, current_user: CurrentUser
 ):
     """Update AI model and prompt settings for a project."""
-    result = await db.execute(select(Project).where(Project.id == project_id))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await require_project_access(db, project_id, current_user.id)
 
     current = dict(project.settings or {})
     for field, val in data.model_dump(exclude_none=True).items():
@@ -691,9 +686,7 @@ async def update_project_settings(
 async def export_project_bibtex(project_id: int, db: DB, current_user: CurrentUser):
     from app.routers.references import _to_bibtex
 
-    project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await require_project_access(db, project_id, current_user.id)
 
     refs = (await db.execute(
         select(Reference)

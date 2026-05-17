@@ -1,7 +1,8 @@
 from typing import Optional
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from app.dependencies import DB, CurrentUser
+from app.services.access import require_project_access
 from app.services.search import full_text_search
 
 router = APIRouter(prefix="/search", tags=["search"])
@@ -24,6 +25,16 @@ async def search(
     offset: int = Query(0),
 ):
     from app.schemas.reference import ReferenceOut
+
+    # Search must be scoped to a project the user can access. Without this an
+    # unscoped query returned hits from every user's library.
+    if project_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="project_id is required — search is scoped to a project you have access to.",
+        )
+    await require_project_access(db, project_id, current_user.id)
+
     refs, snippets, total = await full_text_search(
         db, q, collection_id, project_id, source_type, limit, offset,
         year_from=year_from, year_to=year_to,
