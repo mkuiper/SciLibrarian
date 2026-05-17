@@ -82,6 +82,8 @@ _MIGRATIONS = [
     ' applied_at TIMESTAMPTZ NOT NULL DEFAULT now()'
     ')',
     'CREATE INDEX IF NOT EXISTS ix_restructure_actions_project_time ON restructure_actions (project_id, applied_at DESC)',
+    # Cycle 21: Embedding column for semantic search (JSONB list of floats — no pgvector yet)
+    'ALTER TABLE "references" ADD COLUMN IF NOT EXISTS embedding JSONB',
     # Cycle 20: Living literature review — project-level synthesis, versioned
     'CREATE TABLE IF NOT EXISTS literature_reviews ('
     ' id SERIAL PRIMARY KEY,'

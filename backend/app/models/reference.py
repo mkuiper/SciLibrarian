@@ -32,6 +32,10 @@ class Reference(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     extra_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     full_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Cycle 21: semantic search. Plain JSONB list of floats (no pgvector yet).
+    # Length depends on the embedding model; refs from different models don't
+    # compare to each other and are silently filtered at search time.
+    embedding: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     tsv: Mapped[Optional[Any]] = mapped_column(
         TSVECTOR,
         Computed(

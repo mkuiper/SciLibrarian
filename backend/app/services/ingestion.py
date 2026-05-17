@@ -207,6 +207,26 @@ Return JSON with these fields:
     if arxiv_id:
         meta["arxiv_id"] = arxiv_id
 
+    # Best-effort embedding for semantic search (Cycle 21). Embedding the same
+    # text used at search-time (title + abstract + summary) gives consistent
+    # results. Any failure here must not block ingestion. The wait_for guards
+    # against the embedding provider hanging — without it, an unreachable
+    # OpenAI endpoint or stalled Ollama daemon would freeze ingest forever
+    # (flagged in critical review).
+    try:
+        import asyncio
+        from app.services.embeddings import get_embedding
+        embedding_text = "\n\n".join(
+            v for v in (meta.get("title"), meta.get("abstract"), meta.get("summary")) if v
+        )
+        if embedding_text:
+            emb = await asyncio.wait_for(get_embedding(embedding_text), timeout=15)
+            if emb:
+                meta["embedding"] = emb
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"ingest embedding step failed (non-fatal): {e}")
+
     return meta
 
 

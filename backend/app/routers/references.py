@@ -151,6 +151,7 @@ async def upload_file(
         full_text=meta.get("full_text"),
         doi=meta.get("doi"),
         arxiv_id=meta.get("arxiv_id"),
+        embedding=meta.get("embedding"),
         collection_id=collection_id,
         project_id=project_id,
         created_by=current_user.id,
@@ -207,6 +208,7 @@ async def ingest_from_url(
         full_text=meta.get("full_text"),
         doi=meta.get("doi"),
         arxiv_id=meta.get("arxiv_id"),
+        embedding=meta.get("embedding"),
         collection_id=collection_id,
         project_id=project_id,
         created_by=current_user.id,
@@ -286,6 +288,53 @@ async def list_references(
     stmt = stmt.order_by(Reference.created_at.desc()).offset(offset).limit(limit)
     result = await db.execute(stmt)
     return result.scalars().all()
+
+
+@router.post("/backfill-embeddings", response_model=dict)
+async def backfill_embeddings(
+    db: DB,
+    current_user: CurrentUser,
+    project_id: int = Query(...),
+    limit: int = Query(50, le=200),
+):
+    """Generate embeddings for references that don't have one yet.
+
+    Scoped to project_id (which must belong to the current user). Caps at
+    `limit` per call so the endpoint stays responsive; call repeatedly to
+    backfill a large library.
+    """
+    from app.services.access import require_project_access
+    from app.services.embeddings import get_embedding, embedding_input
+
+    await require_project_access(db, project_id, current_user.id)
+
+    stmt = (
+        select(Reference)
+        .where(Reference.project_id == project_id, Reference.embedding.is_(None))
+        .order_by(Reference.created_at.desc())
+        .limit(max(1, min(200, int(limit))))
+    )
+    candidates = (await db.execute(stmt)).scalars().all()
+
+    processed = 0
+    failed = 0
+    for ref in candidates:
+        text = embedding_input(ref)
+        if not text:
+            continue
+        emb = await get_embedding(text)
+        if emb:
+            ref.embedding = emb
+            processed += 1
+        else:
+            failed += 1
+    await db.flush()
+    return {
+        "scanned": len(candidates),
+        "embedded": processed,
+        "failed": failed,
+        "limit": limit,
+    }
 
 
 @router.get("/batch", response_model=list[ReferenceOut])
@@ -465,6 +514,7 @@ async def _ingest_pdf_and_save(
         full_text=meta.get("full_text"),
         doi=meta.get("doi"),
         arxiv_id=meta.get("arxiv_id"),
+        embedding=meta.get("embedding"),
         collection_id=collection_id,
         project_id=project_id,
         created_by=user_id,
@@ -610,6 +660,7 @@ async def from_urls_bulk(data: BulkUrlRequest, db: DB, current_user: CurrentUser
                 full_text=meta.get("full_text"),
                 doi=meta.get("doi"),
                 arxiv_id=meta.get("arxiv_id"),
+                embedding=meta.get("embedding"),
                 collection_id=data.collection_id,
                 project_id=project_id,
                 created_by=current_user.id,

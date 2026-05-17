@@ -18,6 +18,32 @@ If any cycle uncovers something that wants more time, I'll slow down rather than
 
 ## Cycle log
 
+### Cycle 21 — Semantic search (no pgvector yet) — ✅ done
+
+**Decision up-front:** pgvector isn't available in the `postgres:16-alpine` image the project uses. Probed with `pg_available_extensions` first. Swapping to `pgvector/pgvector:pg16` overnight without supervision felt risky (DB container restart, volume migration). Pivoted to a **soft semantic search**: embeddings stored as JSONB float arrays, Python-side cosine. Correct at current scale (hundreds of refs), and the migration path to pgvector is a one-function-rewrite of `similarity_search` once the image moves.
+
+**Built:**
+- Reused existing `services/embeddings.py` (which had a pgvector-flavoured design that wouldn't work today). Replaced `similarity_search` with a Python implementation that loads project refs with `selectinload(tags)` + `defer(full_text)`, computes cosine in Python, returns sorted (Reference, score) tuples. Skips refs whose dim doesn't match the query embedding (silently mixed-model case).
+- New `embedding_input` and `maybe_embed_reference` helpers + smarter `_pick_default_model` (OpenAI → Ollama → Gemini fallback).
+- Migration: `ALTER TABLE references ADD COLUMN embedding JSONB`. Reference model gains a JSON `embedding` field.
+- Ingest hook in `generate_metadata`: after metadata + summary land, embeds title+abstract+summary with a 15s `asyncio.wait_for` timeout. Best-effort — any failure is logged and ingest continues.
+- `POST /references/backfill-embeddings?project_id=X&limit=50` for existing refs.
+- `GET /search/semantic?q=…&project_id=…` embeds the query (with timeout) and returns top-k by cosine.
+- All Reference creation sites (upload, from-url, bulk-pdf, bulk-url, queue-approve) pass `embedding=meta.get("embedding")`.
+- Frontend `Library.jsx` gains a Sparkles "Semantic / Keyword" toggle next to the search bar. Search input placeholder updates with mode. Semantic mode disables pagination (one shot returns top 30).
+
+**Critical review** (Claude + Gemini in parallel) caught three real issues:
+
+1. **Embedding timeout missing.** `litellm.aembedding` has no built-in timeout. An unreachable provider would block ingest forever. Both reviewers flagged. Fix: wrap both the ingest call and the search-endpoint call with `asyncio.wait_for(..., timeout=15)`.
+2. **Page state didn't reset on toggle.** Switching to semantic with `page=5` produced "Page 5 of 1" disabled buttons. Both reviewers flagged. Fix: `useEffect(() => setPage(0), [semantic])`.
+3. **`similarity_search` loaded `full_text` into memory.** Up to ~50KB per ref × thousands could matter. Gemini caught. Fix: `defer(Reference.full_text)` in the query options.
+
+Acknowledged but not fixed:
+- Docstring in embeddings.py still mentions pgvector in places — replaced the top docstring; some legacy references remain, accurate enough for now.
+- Provider preference (OpenAI vs Ollama) is hardcoded — defer until someone wants to override.
+
+---
+
 ### Cycle 20 — Living literature review v1 — ✅ done
 
 **Goal:** Project-level whole-library synthesis — evergreen, not time-windowed. Researchers get a single page covering themes, methods, consensus, gaps, and reading recommendations for the entire corpus. Differs from Digest (which is "what's new in window X").

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { referencesApi, collectionsApi, searchApi } from '../api/client'
+import { referencesApi, collectionsApi, searchApi, semanticSearchApi } from '../api/client'
 import { useProject } from '../hooks/useProject'
 import ReferenceCard from '../components/ReferenceCard'
 import AddReferenceModal from '../components/AddReferenceModal'
-import { Plus, Search, FolderPlus, Loader2, X, Star, Eye, ChevronDown, ChevronLeft, ChevronRight, Columns } from 'lucide-react'
+import { Plus, Search, FolderPlus, Loader2, X, Star, Eye, ChevronDown, ChevronLeft, ChevronRight, Columns, Sparkles } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const PAGE_SIZE = 50
@@ -116,6 +116,10 @@ export default function Library() {
     year_to: yearTo ? parseInt(yearTo) : undefined,
   }
 
+  const [semantic, setSemantic] = useState(false)
+  // Reset page on every toggle so a "Page 5 of 1" state is impossible after
+  // switching to semantic (which always returns one page).
+  useEffect(() => { setPage(0) }, [semantic])
   const isSearching = searchQ && searchQ.length > 2
   const offset = page * PAGE_SIZE
 
@@ -131,17 +135,26 @@ export default function Library() {
   const refs = listResponse?.results || []
   const listTotal = listResponse?.total ?? 0
 
+  // Keyword search via FTS — handles pagination via offset.
   const { data: searchResults } = useQuery({
     queryKey: ['search', projectId, searchQ, colId, filterType, filterStarred, filterUnread, filterImportant, yearFrom, yearTo, page],
     queryFn: () => searchApi.search({ ...serverFilters, q: searchQ, limit: PAGE_SIZE, offset }).then(r => r.data),
-    enabled: !!isSearching,
+    enabled: !!isSearching && !semantic && !!projectId,
     keepPreviousData: true,
   })
 
-  let displayRefs = isSearching ? (searchResults?.results || []) : refs
-  const total = isSearching ? (searchResults?.total ?? displayRefs.length) : listTotal
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const snippets = isSearching ? Object.fromEntries((searchResults?.results || []).map(r => [r.id, r.snippet])) : {}
+  // Semantic search — embedding-based, currently no pagination (returns top-k from one call).
+  const { data: semanticResults, isFetching: semanticFetching, error: semanticError } = useQuery({
+    queryKey: ['search-semantic', projectId, searchQ],
+    queryFn: () => semanticSearchApi.search({ q: searchQ, project_id: projectId, limit: 30 }).then(r => r.data),
+    enabled: !!isSearching && semantic && !!projectId,
+  })
+
+  const activeSearch = semantic ? semanticResults : searchResults
+  let displayRefs = isSearching ? (activeSearch?.results || []) : refs
+  const total = isSearching ? (activeSearch?.total ?? displayRefs.length) : listTotal
+  const totalPages = Math.max(1, semantic ? 1 : Math.ceil(total / PAGE_SIZE))
+  const snippets = isSearching && !semantic ? Object.fromEntries((searchResults?.results || []).map(r => [r.id, r.snippet])) : {}
 
   if (sortBy === 'year') displayRefs = [...displayRefs].sort((a, b) => (b.year || 0) - (a.year || 0))
   else if (sortBy === 'title') displayRefs = [...displayRefs].sort((a, b) => a.title.localeCompare(b.title))
@@ -186,7 +199,7 @@ export default function Library() {
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               className="input pl-9 text-sm"
-              placeholder="Search — full-text, ranked by relevance..."
+              placeholder={semantic ? 'Semantic search — find conceptually similar refs...' : 'Search — full-text, ranked by relevance...'}
               value={searchQ}
               onChange={e => setSearchQ(e.target.value)}
             />
@@ -196,6 +209,13 @@ export default function Library() {
               </button>
             )}
           </div>
+          <button
+            onClick={() => setSemantic(v => !v)}
+            className={`btn-ghost text-sm gap-1.5 ${semantic ? 'text-alexandria-700 bg-alexandria-50' : ''}`}
+            title={semantic ? 'Switch to keyword (full-text) search' : 'Switch to semantic search (embedding-based)'}
+          >
+            <Sparkles size={13} />{semantic ? 'Semantic' : 'Keyword'}
+          </button>
           <select value={filterType} onChange={e => setFilterType(e.target.value)} className="input w-40 text-sm">
             <option value="">All types</option>
             {SOURCE_TYPES.map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}

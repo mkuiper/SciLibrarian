@@ -124,6 +124,7 @@ async def _approve_item(
                 full_text=meta.get("full_text"),
                 doi=meta.get("doi") or item.doi,
                 arxiv_id=meta.get("arxiv_id") or item.arxiv_id,
+                embedding=meta.get("embedding"),
                 collection_id=collection_id,
                 project_id=project_id,
                 created_by=user_id,

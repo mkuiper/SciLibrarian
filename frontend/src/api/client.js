@@ -89,6 +89,11 @@ export const referencesApi = {
   fileUrl: (id) => `${BASE}/references/${id}/file`,
   bibtexUrl: (id) => `${BASE}/references/${id}/bibtex`,
   citations: (id) => api.get(`/references/${id}/citations`, { timeout: 30000 }),
+  backfillEmbeddings: (projectId, limit = 50) => api.post('/references/backfill-embeddings', null, { params: { project_id: projectId, limit }, timeout: 600000 }),
+}
+
+export const semanticSearchApi = {
+  search: (params) => api.get('/search/semantic', { params, timeout: 30000 }),
 }
 
 export const searchApi = {
