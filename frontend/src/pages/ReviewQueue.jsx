@@ -211,17 +211,26 @@ export default function ReviewQueue() {
 
   const bulkReject = async () => {
     if (!items.length) return
-    if (!confirm(`Reject all ${items.length} pending items?`)) return
+    // window.prompt returns null on cancel, "" on empty submit. Both are
+    // treated as "no reason" (matches single-reject flow).
+    const promptText = `Reject all ${items.length} pending items?\n\nOptional: why? One short line — Alexandria uses this to refine the monitor's negative keywords. Leave empty to skip.`
+    const reason = window.prompt(promptText, '')
+    if (reason === null) return  // user cancelled
+    const trimmed = (reason || '').trim()
     setBulkLoading(true)
     let rejected = 0
     for (const item of items) {
       try {
-        await reviewApi.decide(item.id, { action: 'reject', full_ingest: false })
+        await reviewApi.decide(item.id, {
+          action: 'reject',
+          full_ingest: false,
+          rejection_reason: trimmed || undefined,
+        })
         rejected++
       } catch {}
     }
     queryClient.invalidateQueries({ queryKey: ['review-queue'] })
-    toast.success(`Rejected ${rejected} items`)
+    toast.success(`Rejected ${rejected} items${trimmed ? ' with reason' : ''}`)
     setBulkLoading(false)
   }
 
