@@ -41,6 +41,7 @@ export const projectsApi = {
   getLiteratureReview: (id) => api.get(`/projects/${id}/literature-review`),
   generateLiteratureReview: (id) => api.post(`/projects/${id}/literature-review`, null, { timeout: 300000 }),
   literatureReviewHistory: (id, limit = 10) => api.get(`/projects/${id}/literature-review/history`, { params: { limit } }),
+  activity: (id, limit = 50, since = null) => api.get(`/projects/${id}/activity`, { params: { limit, since: since || undefined } }),
   listDigests: (id) => api.get(`/projects/${id}/digests`),
   createDigest: (id, data) => api.post(`/projects/${id}/digests`, data, { timeout: 180000 }),
   getDigest: (projectId, digestId) => api.get(`/projects/${projectId}/digests/${digestId}`),

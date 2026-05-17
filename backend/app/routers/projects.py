@@ -541,6 +541,35 @@ async def delete_digest(project_id: int, digest_id: int, db: DB, current_user: C
     await db.delete(digest)
 
 
+@router.get("/{project_id}/activity", response_model=dict)
+async def project_activity_endpoint(
+    project_id: int,
+    db: DB,
+    current_user: CurrentUser,
+    limit: int = 50,
+    since: Optional[str] = None,
+):
+    """Chronological feed of every recorded event for this project.
+
+    Merges refs added, queue decisions, restructure actions, literature
+    reviews, monitor runs, and digests into one timeline. Project-access
+    protected.
+    """
+    from datetime import datetime
+    from app.services.activity import project_activity
+
+    await require_project_access(db, project_id, current_user.id)
+    parsed_since = None
+    if since:
+        try:
+            parsed_since = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(400, "since must be ISO-8601 datetime")
+    limit = max(1, min(200, int(limit)))
+    events = await project_activity(db, project_id, limit=limit, since=parsed_since)
+    return {"events": events}
+
+
 @router.get("/{project_id}/literature-review", response_model=dict)
 async def get_literature_review(project_id: int, db: DB, current_user: CurrentUser):
     """Return the most recent literature review for this project (404 if never generated)."""

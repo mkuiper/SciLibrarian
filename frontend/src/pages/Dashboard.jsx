@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { projectsApi, referencesApi, reviewApi } from '../api/client'
 import { useAuth } from '../store/auth'
 import { useProject } from '../hooks/useProject'
-import { BookOpen, Inbox, Sparkles, Plus, ArrowRight, Radio, Tag, TrendingUp } from 'lucide-react'
+import { BookOpen, Inbox, Sparkles, Plus, ArrowRight, Radio, Tag, TrendingUp, Activity, Check, X, FolderPlus, Edit3, GitMerge, Scroll, FileText, RadioTower } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
 function StatCard({ icon: Icon, label, value, color, onClick }) {
@@ -45,6 +45,14 @@ export default function Dashboard() {
     enabled: !!projectId,
     staleTime: 60 * 1000,
   })
+
+  const { data: activityData } = useQuery({
+    queryKey: ['activity', projectId],
+    queryFn: () => projectsApi.activity(projectId, 20).then(r => r.data),
+    enabled: !!projectId,
+    staleTime: 60 * 1000,
+  })
+  const activityEvents = activityData?.events || []
 
   const structure = currentProject?.initial_structure
   const activeMonitors = monitors.filter(m => m.enabled).length
@@ -134,6 +142,64 @@ export default function Dashboard() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Activity feed — chronological merge of every recorded event */}
+      {currentProject && activityEvents.length > 0 && (
+        <div className="card p-5 mb-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Activity size={15} className="text-alexandria-600" />
+            <h2 className="text-sm font-semibold text-gray-700">Activity</h2>
+            <span className="text-xs text-gray-400 ml-auto">most recent {activityEvents.length}</span>
+          </div>
+          <ul className="space-y-2">
+            {activityEvents.map((evt, i) => {
+              const Icon = (
+                evt.type === 'reference_added'             ? BookOpen :
+                evt.type === 'queue_approved'              ? Check :
+                evt.type === 'queue_rejected'              ? X :
+                evt.type === 'restructure_create_collection' ? FolderPlus :
+                evt.type === 'restructure_rename_collection' ? Edit3 :
+                evt.type === 'restructure_move_references'   ? ArrowRight :
+                evt.type === 'restructure_merge_collections' ? GitMerge :
+                evt.type === 'literature_review_generated' ? Scroll :
+                evt.type === 'monitor_ran'                 ? RadioTower :
+                evt.type === 'digest_generated'            ? FileText :
+                                                              Activity
+              )
+              const colorClass = (
+                evt.type.startsWith('queue_approved')      ? 'text-emerald-500' :
+                evt.type.startsWith('queue_rejected')      ? 'text-red-400' :
+                evt.type.startsWith('restructure_')        ? 'text-purple-500' :
+                evt.type === 'literature_review_generated' ? 'text-alexandria-600' :
+                evt.type === 'monitor_ran'                 ? 'text-blue-500' :
+                evt.type === 'digest_generated'            ? 'text-amber-500' :
+                                                              'text-gray-400'
+              )
+              return (
+                <li
+                  // Drop the array index — it shifts on every refetch and
+                  // forces React to remount the entire list (Cycle 24 review
+                  // catch). `type+timestamp` is unique across our sources.
+                  key={`${evt.type}-${evt.timestamp}`}
+                  onClick={() => evt.link && navigate(evt.link)}
+                  className={`flex items-start gap-3 py-1.5 px-2 -mx-2 rounded ${evt.link ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                >
+                  <Icon size={13} className={`${colorClass} flex-shrink-0 mt-1`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-700 truncate">{evt.title}</p>
+                    {evt.description && (
+                      <p className="text-xs text-gray-400 truncate">{evt.description}</p>
+                    )}
+                  </div>
+                  <span className="text-xs text-gray-400 flex-shrink-0 mt-1">
+                    {formatDistanceToNow(new Date(evt.timestamp), { addSuffix: true })}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
         </div>
       )}
 

@@ -18,6 +18,39 @@ If any cycle uncovers something that wants more time, I'll slow down rather than
 
 ## Cycle log
 
+### Cycle 24 — Project Activity Feed — ✅ done
+
+**Goal:** A chronological merge of every recorded event for a project — refs added, queue decisions, restructure actions, literature-review generations, monitor runs, digests — so "what happened lately?" answers in one read instead of six different pages.
+
+**Built:**
+- `services/activity.py` with one helper per source table, returning uniform `{timestamp, type, title, description, link, actor_id}` events.
+- `GET /projects/{id}/activity?limit=&since=` — access-protected, ISO-8601 `since` parsing.
+- Dashboard "Activity" card with type-specific icons (BookOpen, Check, X, FolderPlus, Edit3, ArrowRight, GitMerge, Scroll, RadioTower, FileText), relative timestamps, click-through to source page.
+
+**Three-agent review** — first cycle with Codex back in theory.
+
+| Reviewer | Result |
+|----------|--------|
+| Codex (gpt-5.5) | **Still failing** — sandbox returns `bwrap: RTM_NEWADDR: Operation not permitted` again. Auth is fixed (probe earlier in the session worked with `codex exec`), but `codex review --uncommitted` needs shell access for git inspection and that's still blocked by bubblewrap. Different from the auth problem. Possibly the parallel-session conflict re-emerged, or the environment-level user-namespace permission was never the issue. Falling back to Claude + Gemini. |
+| Claude (Sonnet 4.6) | **3 real bugs.** |
+| Gemini (3.1 Pro Preview) | **2 real bugs**, both overlapping with Claude. |
+
+**Real bugs caught and fixed in this cycle:**
+
+1. **Critical: `asyncio.gather` over a single `AsyncSession` is unsafe** (Claude). SQLAlchemy's AsyncSession owns one DBAPI connection and raises `InvalidRequestError` under interleaved use, even for read-only queries. The "single shared session is fine" comment in my first draft was just wrong. Fix: sequential `for fn in sources` loop. Six indexed queries serially is still sub-second at our scale.
+
+2. **Critical: `since` filter was post-hoc string comparison** (Claude). The diff did `events = [e for e in events if e["timestamp"] >= since.isoformat()]` — but ISO-8601 strings with different timezone offsets compare lexicographically wrong (`2026-05-18T10:00:00+05:00` sorts greater than `2026-05-18T05:00:00+00:00` even though they're the same instant). Fix: normalise the input to UTC datetime, push the `>=` comparison down to SQL in each fan-out helper.
+
+3. **Critical: per-table limit was `min(limit, 50)`, not `limit`** (Gemini). If one table is hot — say 80 refs added today — we'd cap that table at 50 and miss 30 events even when the global cap could hold them. Fix: each fan-out helper now uses the full requested limit.
+
+4. **Minor: JSX key included array index** (Claude). `${type}-${timestamp}-${i}` made `i` shift on every refetch and React would unmount/remount the whole list. Fix: drop `i`. `${type}-${timestamp}` is unique across all sources.
+
+5. **Documentation: restructure friendly-text duplication** (Claude). The activity service rebuilds the same "Created X with N references" phrasing that `RestructurePage.jsx` does. Drift risk. Not fixed in this cycle — both implementations have a comment flagging the duplicate. Defer to a future small cycle where we extract the helper.
+
+**Codex status going into next cycle:** I'll probe again with a `git diff` piped through `codex exec` (no shell access needed) rather than `codex review --uncommitted`. If that works, Codex still adds value just not through the purpose-built review subcommand.
+
+---
+
 ### Cycle 23 — Hybrid search via Reciprocal Rank Fusion — ✅ done
 
 **Built:** Hybrid retrieval combining Cycle 11 FTS + Cycle 21 semantic via RRF (k=60, the canonical value from Cormack & Clarke). New `hybrid_search()` in `services/search.py` pulls top 30 from each method, computes `sum(1/(60+rank))` per ref across both lists, returns merged top-N as `(ref, rrf_score, components)` where components is `{fts_rank, semantic_rank, snippet}`. New `GET /search/hybrid` endpoint, access-protected. Frontend Library replaces the binary Semantic/Keyword toggle with a three-way segmented control (Keyword / Hybrid / Semantic), defaulting to **Hybrid** — the right answer for most research-paper queries.
