@@ -179,6 +179,14 @@ Would be ideal — it's purpose-built for this and returns structured findings J
 
 **Resolved (Cycle 24 prep):** User identified a parallel Codex instance running elsewhere, which fit the failure mode — bubblewrap's user-namespace isolation can collide with concurrent sessions in the same uid space. After shutting that down and re-running `codex logout && codex login`, Codex works again. Codex is back in the rotation.
 
+### Codex review modes — `--commit HEAD` works, `--uncommitted` still blocked
+
+Tested both forms post-auth-fix in Cycle 24. `codex review --commit HEAD` succeeds — Codex reviewed the just-pushed Cycle 24 commit and caught a real bug ([P2] React key collision on bulk inserts where Postgres `now()` returns the same `created_at` across all rows in a transaction). That's exactly the kind of subtle data-flow bug Claude and Gemini both missed.
+
+`codex review --uncommitted` still fails with `bwrap: RTM_NEWADDR`. The difference: `--uncommitted` needs shell access to read the working tree, which goes through bubblewrap; `--commit` reads via libgit2 and skips bwrap.
+
+**Practical implication for overnight cycles:** commit before running Codex, then `codex review --commit HEAD`. Costs one extra commit (or a `git stash && git stash apply` dance if we want to review before committing).
+
 ### Reviewer invocations (current, post-Cycle-23)
 
 For overnight cycles, use the latest models on each side. Pin them in the invocation so a CLI auto-update doesn't silently shift the reviewer's behaviour mid-night.

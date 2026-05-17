@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 def _event(
     *,
+    source_id: int,
     timestamp: datetime,
     event_type: str,
     title: str,
@@ -42,8 +43,18 @@ def _event(
     link: Optional[str] = None,
     actor_id: Optional[int] = None,
 ) -> dict:
-    """One activity entry — uniform across the eight source tables."""
+    """One activity entry — uniform across the eight source tables.
+
+    `source_id` is the primary key of the row in its source table. Combined
+    with `type`, it forms a globally unique identifier for the event — needed
+    because multiple events of the same type can share a timestamp when the
+    underlying rows were inserted in one transaction (Postgres `now()` returns
+    the transaction start time, so e.g. a bulk reference upload produces N
+    `reference_added` events all sharing `created_at`). Cycle 24 Codex review
+    catch.
+    """
     return {
+        "source_id": source_id,
         "timestamp": timestamp.isoformat() if timestamp else None,
         "type": event_type,
         "title": title,
@@ -62,6 +73,7 @@ async def _recent_references(
     rows = (await db.execute(stmt.order_by(Reference.created_at.desc()).limit(limit))).scalars().all()
     return [
         _event(
+            source_id=r.id,
             timestamp=r.created_at,
             event_type="reference_added",
             title=r.title or "(untitled reference)",
@@ -90,6 +102,7 @@ async def _recent_decisions(
     for item in rows:
         verdict = "approved" if item.status == "approved" else "rejected"
         out.append(_event(
+            source_id=item.id,
             timestamp=item.reviewed_at,
             event_type=f"queue_{verdict}",
             title=item.title or "(untitled queue item)",
@@ -139,6 +152,7 @@ async def _recent_restructure_actions(
         else:
             description = atype
         out.append(_event(
+            source_id=row["id"],
             timestamp=row["applied_at"],
             event_type=f"restructure_{atype}",
             title=description,
@@ -158,6 +172,7 @@ async def _recent_literature_reviews(
     rows = (await db.execute(stmt.order_by(LiteratureReview.created_at.desc()).limit(limit))).scalars().all()
     return [
         _event(
+            source_id=r.id,
             timestamp=r.created_at,
             event_type="literature_review_generated",
             title=f"Literature review v{r.version}",
@@ -185,6 +200,7 @@ async def _recent_monitor_runs(
     rows = (await db.execute(stmt.order_by(SearchMonitor.last_run.desc()).limit(limit))).scalars().all()
     return [
         _event(
+            source_id=m.id,
             timestamp=m.last_run,
             event_type="monitor_ran",
             title=f"Monitor \"{m.name}\" ran",
@@ -205,6 +221,7 @@ async def _recent_digests(
     rows = (await db.execute(stmt.order_by(Digest.created_at.desc()).limit(limit))).scalars().all()
     return [
         _event(
+            source_id=d.id,
             timestamp=d.created_at,
             event_type="digest_generated",
             title=d.title or "Digest",

@@ -179,10 +179,12 @@ export default function Dashboard() {
               )
               return (
                 <li
-                  // Drop the array index — it shifts on every refetch and
-                  // forces React to remount the entire list (Cycle 24 review
-                  // catch). `type+timestamp` is unique across our sources.
-                  key={`${evt.type}-${evt.timestamp}`}
+                  // Key on (type, source_id): the source-table primary key is
+                  // the only thing guaranteed unique across our sources.
+                  // `type+timestamp` collided for bulk inserts where Postgres
+                  // `now()` returns the same transaction-start time across
+                  // every row in the batch (Cycle 24 Codex review catch).
+                  key={`${evt.type}-${evt.source_id}`}
                   onClick={() => evt.link && navigate(evt.link)}
                   className={`flex items-start gap-3 py-1.5 px-2 -mx-2 rounded ${evt.link ? 'cursor-pointer hover:bg-gray-50' : ''}`}
                 >
