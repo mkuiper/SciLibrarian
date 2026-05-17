@@ -213,7 +213,16 @@ export default function ReviewQueue() {
     if (!items.length) return
     // window.prompt returns null on cancel, "" on empty submit. Both are
     // treated as "no reason" (matches single-reject flow).
-    const promptText = `Reject all ${items.length} pending items?\n\nOptional: why? One short line — Alexandria uses this to refine the monitor's negative keywords. Leave empty to skip.`
+    // Note the reason applies to EVERY item in the batch, which may span
+    // multiple monitors — each monitor's learning will see the same line.
+    // If the items aren't actually related, leave the reason empty and
+    // give each item a specific reason via single-reject instead. Flagged
+    // in Cycle 25 critical review.
+    const monitorIds = new Set(items.map(i => i.monitor_id).filter(Boolean))
+    const monitorWarning = monitorIds.size > 1
+      ? `\n\n⚠ These items come from ${monitorIds.size} different monitors — the same reason will apply to each monitor's learning. Leave empty if the items aren't all rejected for the same reason.`
+      : ''
+    const promptText = `Reject all ${items.length} pending items?\n\nOptional: why? One short line — Alexandria uses this to refine the monitor's negative keywords. Leave empty to skip.${monitorWarning}`
     const reason = window.prompt(promptText, '')
     if (reason === null) return  // user cancelled
     const trimmed = (reason || '').trim()

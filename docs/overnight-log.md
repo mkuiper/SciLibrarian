@@ -18,6 +18,27 @@ If any cycle uncovers something that wants more time, I'll slow down rather than
 
 ## Cycle log
 
+### Cycle 25 — Bulk reject with shared reason — ✅ done
+
+Closes the Cycle 17 follow-up: bulkReject silently skipped the reason path, so a batch of "reject all" produced 0 monitor-learning signal even when the items shared an obvious pattern. Now uses `window.prompt` for an optional shared reason, passed through to every `decide()` call.
+
+**Three-agent review:**
+
+| Reviewer | Result |
+|----------|--------|
+| Codex (gpt-5.5) | Failed — different mode this time. The commit was local-only; Codex uses GitHub MCP tools to fetch the changeset and couldn't find the commit on the remote. **Practical lesson:** `codex review --commit HEAD` needs the commit pushed already. Workflow for next time: commit → push → review. |
+| Claude (Sonnet 4.6) | **1 real concern.** The bulk queue can mix items from different monitors (the QueueItem renders `item.search_query` so visibly different sources are in one list). A reason that fits some items would poison unrelated monitors' learning, since `suggest_monitor_improvements` pulls the last 10 rejections *with their reasons* per-monitor and weights them heavily. Fix: detect when items span multiple monitors and add an explicit ⚠ warning to the prompt text, telling the user to leave the reason empty if they're not all rejected for the same reason. |
+| Gemini (3.1 Pro Preview) | Style nits + pre-existing concerns (window.prompt vs inline form, sequential await, swallowed errors in catch). Nothing new introduced. |
+
+**Codex review modes — summary so far:**
+- `--uncommitted` → bwrap sandbox failure (needs shell tree access)
+- `--commit HEAD` against unpushed commit → MCP can't find the commit
+- `--commit HEAD` against pushed commit → ✓ works (Cycle 24's retry succeeded)
+
+So the workflow for getting Codex into the rotation is: **commit → push → run Codex review on HEAD**. One extra push round-trip per cycle.
+
+---
+
 ### Cycle 24 — Project Activity Feed — ✅ done
 
 **Goal:** A chronological merge of every recorded event for a project — refs added, queue decisions, restructure actions, literature-review generations, monitor runs, digests — so "what happened lately?" answers in one read instead of six different pages.
