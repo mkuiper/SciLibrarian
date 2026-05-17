@@ -177,7 +177,28 @@ This is non-optional for Gemini in `--yolo` mode. Claude in `--print` mode has b
 
 Would be ideal — it's purpose-built for this and returns structured findings JSON. Its bwrap sandbox failed on every attempt during Cycles 15, 18, 20 with `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` — same error even with `--dangerously-bypass-approvals-and-sandbox`.
 
-**Update (overnight Cycle 23 break):** the user noted they had another Codex instance running elsewhere during these cycles. That fits the failure mode exactly — bubblewrap's user-namespace isolation can collide with a concurrent session in the same uid space. Plan to retry on Cycle 24+ with the other instance shut down. If Codex works, it becomes the third reviewer in rotation (Claude + Gemini + Codex), and the structured findings JSON is much nicer to parse than Claude/Gemini's prose. Falling back to Claude + Gemini remains the safety net.
+**Resolved (Cycle 24 prep):** User identified a parallel Codex instance running elsewhere, which fit the failure mode — bubblewrap's user-namespace isolation can collide with concurrent sessions in the same uid space. After shutting that down and re-running `codex logout && codex login`, Codex works again. Codex is back in the rotation.
+
+### Reviewer invocations (current, post-Cycle-23)
+
+For overnight cycles, use the latest models on each side. Pin them in the invocation so a CLI auto-update doesn't silently shift the reviewer's behaviour mid-night.
+
+```bash
+# Claude (Sonnet for routine, Opus for high-stakes security or schema)
+echo "$DIFF" | claude -p "$REVIEW_PROMPT" --print
+echo "$DIFF" | claude -p "$REVIEW_PROMPT" --print --model opus-4-7   # escalation
+
+# Gemini 3.1 Pro preview (best-in-class for architecture/cache concerns)
+echo "$DIFF" | gemini -p "$REVIEW_PROMPT" -m gemini-3.1-pro-preview --yolo --skip-trust
+
+# Codex with GPT-5.5 (structured findings JSON, purpose-built for review)
+codex review --uncommitted --title "$CYCLE_TITLE" -c model='"gpt-5.5"'
+```
+
+The CLI version pins (working as of Cycle 23):
+- Claude Code 2.1.143
+- Gemini CLI 0.42.0
+- Codex CLI 0.130.0
 
 ### Talley of overnight findings
 
