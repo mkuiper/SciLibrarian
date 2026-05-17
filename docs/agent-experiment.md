@@ -108,6 +108,92 @@ Time accounting (rough):
 
 ---
 
+## Review prompt patterns (overnight findings)
+
+After eight cycles of multi-agent critical review (Cycles 15-22, full per-cycle entries in `docs/overnight-log.md`), here are the prompt patterns that produce useful catches and the ones that don't. Captured here as a living style guide.
+
+### The shape that works
+
+```
+Critically review this diff for SciLibrarian.
+
+It [one sentence — what the diff does in user-facing terms].
+
+[One paragraph — the technical mechanism: what tables/endpoints/services
+changed, what design choices I made, anything non-obvious].
+
+Real bugs only — under {N} words. Distinguish real bugs from style nits.
+
+Specifically check:
+1. {Concern I'm uncertain about, phrased as a question}
+2. {Hypothesis I want them to test}
+3. {Edge case I think might fail}
+4. ...
+```
+
+The four ingredients, in priority order:
+
+1. **An explicit word limit.** "Real bugs only, under 250 words" cuts the noise more than any other instruction. Both agents respect it. Without it, Gemini in particular will produce long architecture-essay reports.
+
+2. **Numbered focus questions you're actually uncertain about.** The strongest catches happen when I ask about something specific I half-suspect is broken — "in this branch where X is empty, does the SQLAlchemy call still produce valid SQL?". Both agents prioritise focused questions over scanning the whole diff. Avoid generic ("any concerns?") — generic prompts get generic answers.
+
+3. **"Distinguish real bugs from style nits."** This phrase alone cuts ~half of Gemini's false-positive rate. Both agents will return style observations otherwise.
+
+4. **Tell them what NOT to flag.** Pre-existing patterns (e.g. "project access on direct ref endpoints is a known standing gap, not for this diff"). Saves cycles disproving "you should also check X" findings.
+
+### Differences between Gemini and Claude as reviewers
+
+- **Claude (Code CLI, `claude -p`).** Better signal-to-noise. Cross-checks its own claims more often. Catches subtle data-flow bugs (the stale `in_library_id` in Cycle 15 is the canonical example — it took reading multiple files to spot the cache-invalidation gap, and Gemini missed it). Default to Claude when you can only afford one reviewer.
+- **Gemini (`gemini -p --yolo --skip-trust`).** Strong on architecture-level concerns (cache lifecycle, locking, rate limits). Higher false-positive rate, especially when the prompt is loose. Sometimes hallucinates bugs (Cycle 17 claimed a missing field that was clearly present). Verify everything Gemini flags against the actual code before acting.
+
+Both together catch ~50% more real bugs than either alone, at ~45s + ~45s = ~90s total when run in parallel. The Cycle 19 access-enforcement work would have shipped *six missed surfaces* without both reviewers running simultaneously.
+
+### When to skip the review pass
+
+- One-liner bug fixes (Cycle 14.2 model-selection fix, Cycle 22 access-check addition) — solo Claude pass is fine.
+- Pure renames, doc-only changes, dependency bumps.
+- Anything where the test instance will exercise the change immediately.
+
+### When NOT to skip
+
+- Anything new in `routers/` (new endpoint surface area).
+- Anything touching access control, deduplication, or caching.
+- LLM-output parsing changes (Cycle 14 restructure resilience).
+- Any change that adds a new SQL pattern.
+
+### Critical: pin the reviewer to "report only"
+
+Cycle 23 surfaced a failure mode. Even with the prompt asking for "real bugs only, under N words", Gemini in `--yolo` mode interpreted the review as licence to patch the diff directly. The fixes were correct improvements *but* it left a duplicated JSX tail block after the function's closing brace — a syntax error that would have crashed the frontend on module load.
+
+Always include in the reviewer prompt:
+
+```
+Report findings only. Do not edit files.
+```
+
+This is non-optional for Gemini in `--yolo` mode. Claude in `--print` mode has been better-behaved but the same instruction costs nothing and protects against future surprises.
+
+### Codex CLI (`codex review --uncommitted`)
+
+Would be ideal — it's purpose-built for this and returns structured findings JSON. But its bwrap sandbox fails in this container environment (`RTM_NEWADDR: Operation not permitted`) and refuses to inspect the diff. Tried it on Cycles 15, 18, 20 — same failure every time. Until that sandbox issue clears upstream or Codex moves to a different isolation backend, falling back to Claude + Gemini on stdin is the working configuration.
+
+### Talley of overnight findings
+
+| Cycle | Real bugs | False positives | Net value |
+|-------|-----------|-----------------|-----------|
+| 15 (citations) | 8 | 0 | High |
+| 16 (Ollama diag) | 3 | 0 | High |
+| 17 (reject reasons) | 1 | 4 | Net positive, but noisy |
+| 18 (audit log) | 0 | 0 | Confirmed design |
+| 19 (access enforcement) | 6+ | 0 | **Critical** — would have shipped insecure |
+| 20 (lit review) | 2 | 0 | High |
+| 21 (semantic) | 3 | 0 | High |
+| 22 (small bundle) | 0 (solo review) | n/a | Confirmed design |
+
+~23 real bugs caught across 8 cycles vs. ~6 false positives. Roughly 3-5 minutes of review work per cycle.
+
+---
+
 ## Experiment 3 — Multi-agent critical review of Cycle 15 (citation graph)
 
 **Date:** 2026-05-16

@@ -96,6 +96,10 @@ export const semanticSearchApi = {
   search: (params) => api.get('/search/semantic', { params, timeout: 30000 }),
 }
 
+export const hybridSearchApi = {
+  search: (params) => api.get('/search/hybrid', { params, timeout: 45000 }),
+}
+
 export const searchApi = {
   search: (params) => api.get('/search', { params }),
 }

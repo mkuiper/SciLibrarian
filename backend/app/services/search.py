@@ -6,6 +6,106 @@ from sqlalchemy.orm import selectinload
 from app.models.reference import Reference
 
 
+# Standard Reciprocal Rank Fusion constant from Cormack & Clarke (2009).
+# Higher k flattens the curve — less weight at the top, more uniform across the list.
+# 60 is the canonical value used by Elasticsearch, OpenSearch, etc.
+_RRF_K = 60
+
+
+async def hybrid_search(
+    db: AsyncSession,
+    query: str,
+    project_id: int,
+    *,
+    limit: int = 20,
+    pool_per_method: int = 30,
+    collection_id: Optional[int] = None,
+) -> list[tuple[Reference, float, dict]]:
+    """Merge FTS + semantic results via Reciprocal Rank Fusion.
+
+    Pulls the top `pool_per_method` from each retrieval method, computes
+    sum(1 / (RRF_K + rank)) across both lists for each unique reference,
+    returns the merged top `limit` as (ref, rrf_score, components) tuples
+    where components is {fts_rank, semantic_rank, snippet}.
+
+    Parallelizes FTS and embedding generation. Falls back to FTS-only if
+    embedding fails or times out (15s).
+    """
+    import asyncio
+    from app.services.embeddings import get_embedding, similarity_search
+
+    # 1. Parallelize FTS pool and Embedding generation
+    fts_task = full_text_search(
+        db, query, collection_id=collection_id, project_id=project_id,
+        limit=pool_per_method, offset=0,
+    )
+    
+    # Embedding might hang/slow; wrap in timeout.
+    embedding_task = asyncio.wait_for(get_embedding(query), timeout=15.0)
+
+    try:
+        results = await asyncio.gather(
+            fts_task, embedding_task, return_exceptions=True
+        )
+        fts_result = results[0]
+        query_embedding = results[1]
+
+        # Handle exceptions from gather (e.g. timeout or LiteLLM error)
+        if isinstance(fts_result, Exception):
+            raise fts_result # FTS failure is fatal for hybrid search
+        
+        fts_refs, fts_snippets, _ = fts_result
+        
+        if isinstance(query_embedding, Exception):
+            query_embedding = [] # Embedding failure is a fallback case
+    except asyncio.TimeoutError:
+        # If gather itself timed out (shouldn't happen with inner wait_for but safe)
+        fts_refs, fts_snippets, _ = await fts_task
+        query_embedding = []
+
+    fts_ranks: dict[int, int] = {ref.id: idx + 1 for idx, ref in enumerate(fts_refs)}
+    fts_snippet_map: dict[int, str] = {
+        ref.id: fts_snippets[idx] for idx, ref in enumerate(fts_refs) if fts_snippets[idx]
+    }
+
+    # 2. Semantic pool — run similarity search with the embedding we just got
+    semantic_ranks: dict[int, int] = {}
+    semantic_pool: list[Reference] = []
+    if query_embedding:
+        scored = await similarity_search(
+            db, query_embedding,
+            project_id=project_id,
+            collection_id=collection_id,
+            limit=pool_per_method,
+        )
+        for idx, (ref, _) in enumerate(scored):
+            semantic_ranks[ref.id] = idx + 1
+            semantic_pool.append(ref)
+
+    # Build a ref-id → Reference map from both pools
+    ref_by_id: dict[int, Reference] = {r.id: r for r in fts_refs}
+    for r in semantic_pool:
+        ref_by_id.setdefault(r.id, r)
+
+    # 3. RRF: score = sum over methods of 1 / (k + rank). Higher is better.
+    scored_ids: list[tuple[int, float, dict]] = []
+    for ref_id in ref_by_id.keys():
+        components = {
+            "fts_rank": fts_ranks.get(ref_id),
+            "semantic_rank": semantic_ranks.get(ref_id),
+            "snippet": fts_snippet_map.get(ref_id),
+        }
+        score = 0.0
+        if components["fts_rank"]:
+            score += 1.0 / (_RRF_K + components["fts_rank"])
+        if components["semantic_rank"]:
+            score += 1.0 / (_RRF_K + components["semantic_rank"])
+        scored_ids.append((ref_id, score, components))
+
+    scored_ids.sort(key=lambda item: item[1], reverse=True)
+    return [(ref_by_id[rid], score, comp) for rid, score, comp in scored_ids[:limit]]
+
+
 async def full_text_search(
     db: AsyncSession,
     query: str,

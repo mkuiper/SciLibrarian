@@ -3,10 +3,49 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.dependencies import DB, CurrentUser
 from app.services.access import require_project_access
-from app.services.search import full_text_search
+from app.services.search import full_text_search, hybrid_search
 from app.services.embeddings import get_embedding, similarity_search
 
 router = APIRouter(prefix="/search", tags=["search"])
+
+
+@router.get("/hybrid", response_model=dict)
+async def hybrid_search_endpoint(
+    db: DB,
+    current_user: CurrentUser,
+    q: str = Query(..., min_length=2),
+    project_id: int = Query(...),
+    limit: int = Query(20, le=50),
+    collection_id: Optional[int] = Query(None),
+):
+    """Merged keyword + semantic search via Reciprocal Rank Fusion.
+
+    Pulls top 30 from FTS and top 30 from semantic similarity, fuses with
+    RRF (k=60). Each result carries `rrf_score` plus the per-method ranks
+    so the UI can show *why* a ref scored well. Falls back to FTS-only if
+    no embedding provider is configured.
+    """
+    from app.schemas.reference import ReferenceOut
+
+    await require_project_access(db, project_id, current_user.id)
+
+    merged = await hybrid_search(
+        db, q.strip(), project_id=project_id,
+        limit=limit, collection_id=collection_id,
+    )
+    results = []
+    for ref, score, components in merged:
+        out = ReferenceOut.model_validate(ref).model_dump()
+        out["rrf_score"] = round(score, 6)
+        out["fts_rank"] = components["fts_rank"]
+        out["semantic_rank"] = components["semantic_rank"]
+        out["snippet"] = components["snippet"]
+        results.append(out)
+    return {
+        "query": q,
+        "total": len(results),
+        "results": results,
+    }
 
 
 @router.get("/semantic", response_model=dict)

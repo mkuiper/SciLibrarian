@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { referencesApi, collectionsApi, searchApi, semanticSearchApi } from '../api/client'
+import { referencesApi, collectionsApi, searchApi, semanticSearchApi, hybridSearchApi } from '../api/client'
 import { useProject } from '../hooks/useProject'
 import ReferenceCard from '../components/ReferenceCard'
 import AddReferenceModal from '../components/AddReferenceModal'
@@ -116,10 +116,13 @@ export default function Library() {
     year_to: yearTo ? parseInt(yearTo) : undefined,
   }
 
-  const [semantic, setSemantic] = useState(false)
-  // Reset page on every toggle so a "Page 5 of 1" state is impossible after
-  // switching to semantic (which always returns one page).
-  useEffect(() => { setPage(0) }, [semantic])
+  // Three-way search mode: 'keyword' (FTS, paginated) | 'hybrid' (RRF of FTS+semantic) | 'semantic'.
+  // Hybrid is the default — combines exact-term and conceptual matching, which is the right
+  // answer for most research-paper queries.
+  const [searchMode, setSearchMode] = useState('hybrid')
+  const isPagedMode = searchMode === 'keyword'
+  // Reset page when switching mode so paginated views can't show "Page 5 of 1".
+  useEffect(() => { setPage(0) }, [searchMode])
   const isSearching = searchQ && searchQ.length > 2
   const offset = page * PAGE_SIZE
 
@@ -135,26 +138,40 @@ export default function Library() {
   const refs = listResponse?.results || []
   const listTotal = listResponse?.total ?? 0
 
-  // Keyword search via FTS — handles pagination via offset.
+  // Keyword (FTS) — paginated.
   const { data: searchResults } = useQuery({
     queryKey: ['search', projectId, searchQ, colId, filterType, filterStarred, filterUnread, filterImportant, yearFrom, yearTo, page],
     queryFn: () => searchApi.search({ ...serverFilters, q: searchQ, limit: PAGE_SIZE, offset }).then(r => r.data),
-    enabled: !!isSearching && !semantic && !!projectId,
+    enabled: !!isSearching && searchMode === 'keyword' && !!projectId,
     keepPreviousData: true,
   })
 
-  // Semantic search — embedding-based, currently no pagination (returns top-k from one call).
-  const { data: semanticResults, isFetching: semanticFetching, error: semanticError } = useQuery({
+  // Semantic — embedding cosine, one shot.
+  const { data: semanticResults } = useQuery({
     queryKey: ['search-semantic', projectId, searchQ],
     queryFn: () => semanticSearchApi.search({ q: searchQ, project_id: projectId, limit: 30 }).then(r => r.data),
-    enabled: !!isSearching && semantic && !!projectId,
+    enabled: !!isSearching && searchMode === 'semantic' && !!projectId,
+    keepPreviousData: true,
   })
 
-  const activeSearch = semantic ? semanticResults : searchResults
+  // Hybrid — RRF of FTS + semantic, one shot. Default mode.
+  const { data: hybridResults } = useQuery({
+    queryKey: ['search-hybrid', projectId, searchQ],
+    queryFn: () => hybridSearchApi.search({ q: searchQ, project_id: projectId, limit: 30 }).then(r => r.data),
+    enabled: !!isSearching && searchMode === 'hybrid' && !!projectId,
+    keepPreviousData: true,
+  })
+
+  const activeSearch =
+    searchMode === 'semantic' ? semanticResults :
+    searchMode === 'hybrid'   ? hybridResults :
+                                searchResults
   let displayRefs = isSearching ? (activeSearch?.results || []) : refs
   const total = isSearching ? (activeSearch?.total ?? displayRefs.length) : listTotal
-  const totalPages = Math.max(1, semantic ? 1 : Math.ceil(total / PAGE_SIZE))
-  const snippets = isSearching && !semantic ? Object.fromEntries((searchResults?.results || []).map(r => [r.id, r.snippet])) : {}
+  const totalPages = Math.max(1, isPagedMode ? Math.ceil(total / PAGE_SIZE) : 1)
+  const snippets = isSearching && searchMode === 'keyword'
+    ? Object.fromEntries((searchResults?.results || []).map(r => [r.id, r.snippet]))
+    : {}
 
   if (sortBy === 'year') displayRefs = [...displayRefs].sort((a, b) => (b.year || 0) - (a.year || 0))
   else if (sortBy === 'title') displayRefs = [...displayRefs].sort((a, b) => a.title.localeCompare(b.title))
@@ -199,7 +216,7 @@ export default function Library() {
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               className="input pl-9 text-sm"
-              placeholder={semantic ? 'Semantic search — find conceptually similar refs...' : 'Search — full-text, ranked by relevance...'}
+              placeholder={searchMode === 'semantic' ? 'Semantic search — find conceptually similar refs...' : 'Search — keyword or hybrid matching...'}
               value={searchQ}
               onChange={e => setSearchQ(e.target.value)}
             />
@@ -209,13 +226,26 @@ export default function Library() {
               </button>
             )}
           </div>
-          <button
-            onClick={() => setSemantic(v => !v)}
-            className={`btn-ghost text-sm gap-1.5 ${semantic ? 'text-alexandria-700 bg-alexandria-50' : ''}`}
-            title={semantic ? 'Switch to keyword (full-text) search' : 'Switch to semantic search (embedding-based)'}
-          >
-            <Sparkles size={13} />{semantic ? 'Semantic' : 'Keyword'}
-          </button>
+          <div className="flex border border-gray-200 rounded-lg overflow-hidden text-xs">
+            {[
+              { value: 'keyword',  label: 'Keyword',  title: 'Full-text search (Cycle 11 FTS, paginated)' },
+              { value: 'hybrid',   label: 'Hybrid',   title: 'RRF merge of keyword + semantic (recommended)' },
+              { value: 'semantic', label: 'Semantic', title: 'Embedding cosine — finds conceptual matches' },
+            ].map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setSearchMode(opt.value)}
+                title={opt.title}
+                className={`px-2.5 py-1.5 transition-colors ${
+                  searchMode === opt.value
+                    ? 'bg-alexandria-50 text-alexandria-700 font-medium'
+                    : 'bg-white text-gray-500 hover:bg-gray-50'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
           <select value={filterType} onChange={e => setFilterType(e.target.value)} className="input w-40 text-sm">
             <option value="">All types</option>
             {SOURCE_TYPES.map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
@@ -304,7 +334,7 @@ export default function Library() {
               <ReferenceCard
                 key={r.id}
                 reference={r}
-                snippet={snippets[r.id]}
+                snippet={r.snippet || snippets[r.id]}
                 selectable={compareMode}
                 selected={selectedIds.has(r.id)}
                 onToggleSelect={toggleSelect}

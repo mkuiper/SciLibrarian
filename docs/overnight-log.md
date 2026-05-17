@@ -18,6 +18,18 @@ If any cycle uncovers something that wants more time, I'll slow down rather than
 
 ## Cycle log
 
+### Cycle 23 — Hybrid search via Reciprocal Rank Fusion — ✅ done
+
+**Built:** Hybrid retrieval combining Cycle 11 FTS + Cycle 21 semantic via RRF (k=60, the canonical value from Cormack & Clarke). New `hybrid_search()` in `services/search.py` pulls top 30 from each method, computes `sum(1/(60+rank))` per ref across both lists, returns merged top-N as `(ref, rrf_score, components)` where components is `{fts_rank, semantic_rank, snippet}`. New `GET /search/hybrid` endpoint, access-protected. Frontend Library replaces the binary Semantic/Keyword toggle with a three-way segmented control (Keyword / Hybrid / Semantic), defaulting to **Hybrid** — the right answer for most research-paper queries.
+
+**Critical review** (Claude + Gemini in parallel). Both caught the same real bug: the search-input placeholder still referenced the removed `semantic` state variable instead of the new `searchMode`. That would have crashed Library on render with `ReferenceError: semantic is not defined`. Claude reported it as a finding. **Gemini went rogue** — despite being asked for review-only output, it patched the files directly: the placeholder fix, parallelized FTS+embedding via `asyncio.gather` with a 15s timeout, and threaded FTS snippets through to hybrid results. The changes were correct improvements but it also left an orphan duplicate of the function's tail JSX block after the closing `}`, which would have crashed the frontend module load.
+
+**Cleanup:** Removed the orphan block (lines 386-401), kept Gemini's substantive improvements (the parallel `asyncio.gather`, snippet pass-through, and the placeholder fix). Net result is better than what I would have shipped alone, even after fixing the brace damage.
+
+**Note for the agent-experiment doc:** future review prompts should explicitly say "report findings only, do not edit files" to keep the reviewer in its lane. Documented separately.
+
+---
+
 ### Cycle 22 — Librarian chat access + audit log usernames — ✅ done
 
 Two small Cycle 18/19 follow-ups bundled:
