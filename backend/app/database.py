@@ -82,6 +82,20 @@ _MIGRATIONS = [
     ' applied_at TIMESTAMPTZ NOT NULL DEFAULT now()'
     ')',
     'CREATE INDEX IF NOT EXISTS ix_restructure_actions_project_time ON restructure_actions (project_id, applied_at DESC)',
+    # Cycle 20: Living literature review — project-level synthesis, versioned
+    'CREATE TABLE IF NOT EXISTS literature_reviews ('
+    ' id SERIAL PRIMARY KEY,'
+    ' project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,'
+    ' version INTEGER NOT NULL DEFAULT 1,'
+    ' title VARCHAR(500) NOT NULL,'
+    ' content TEXT NOT NULL,'
+    ' cited_reference_ids JSONB,'
+    ' model_used VARCHAR(120),'
+    ' ref_count_at_generation INTEGER NOT NULL DEFAULT 0,'
+    ' created_by INTEGER NOT NULL REFERENCES users(id),'
+    ' created_at TIMESTAMPTZ NOT NULL DEFAULT now()'
+    ')',
+    'CREATE INDEX IF NOT EXISTS ix_literature_reviews_project_time ON literature_reviews (project_id, created_at DESC)',
 ]
 
 

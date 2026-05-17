@@ -533,6 +533,73 @@ async def delete_digest(project_id: int, digest_id: int, db: DB, current_user: C
     await db.delete(digest)
 
 
+@router.get("/{project_id}/literature-review", response_model=dict)
+async def get_literature_review(project_id: int, db: DB, current_user: CurrentUser):
+    """Return the most recent literature review for this project (404 if never generated)."""
+    from app.services import literature_review as lr_service
+    await require_project_access(db, project_id, current_user.id)
+    review = await lr_service.latest(db, project_id)
+    if review is None:
+        raise HTTPException(404, "No literature review has been generated yet for this project")
+    return {
+        "id": review.id,
+        "version": review.version,
+        "title": review.title,
+        "content": review.content,
+        "cited_reference_ids": review.cited_reference_ids or [],
+        "model_used": review.model_used,
+        "ref_count_at_generation": review.ref_count_at_generation,
+        "created_at": review.created_at.isoformat() if review.created_at else None,
+    }
+
+
+@router.post("/{project_id}/literature-review", response_model=dict)
+async def generate_literature_review(project_id: int, db: DB, current_user: CurrentUser):
+    """Generate a fresh literature review version for this project.
+
+    Heavy LLM call — runs over up to 40 references with their summaries.
+    """
+    from app.services import literature_review as lr_service
+    await require_project_access(db, project_id, current_user.id)
+    try:
+        review = await lr_service.generate(db, project_id, current_user.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {
+        "id": review.id,
+        "version": review.version,
+        "title": review.title,
+        "content": review.content,
+        "cited_reference_ids": review.cited_reference_ids or [],
+        "model_used": review.model_used,
+        "ref_count_at_generation": review.ref_count_at_generation,
+        "created_at": review.created_at.isoformat() if review.created_at else None,
+    }
+
+
+@router.get("/{project_id}/literature-review/history", response_model=dict)
+async def list_literature_review_history(
+    project_id: int, db: DB, current_user: CurrentUser, limit: int = 10,
+):
+    """Recent literature review versions for this project, newest first (metadata only)."""
+    from app.services import literature_review as lr_service
+    await require_project_access(db, project_id, current_user.id)
+    versions = await lr_service.history(db, project_id, limit=max(1, min(50, int(limit))))
+    return {
+        "entries": [
+            {
+                "id": r.id,
+                "version": r.version,
+                "title": r.title,
+                "model_used": r.model_used,
+                "ref_count_at_generation": r.ref_count_at_generation,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in versions
+        ]
+    }
+
+
 @router.get("/{project_id}/radar", response_model=dict)
 async def project_radar(project_id: int, db: DB, current_user: CurrentUser):
     """Return a situational briefing: recent additions, emerging tags, queue and monitor state."""

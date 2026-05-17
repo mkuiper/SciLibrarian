@@ -9,6 +9,7 @@ import {
   BookOpen, LayoutDashboard, Inbox, Radio,
   Plus, ChevronDown, ChevronRight, LogOut, FolderPlus,
   Sparkles, Eye, LayoutGrid, SlidersHorizontal, FolderTree, Trash2, Tag,
+  ScrollText,
 } from 'lucide-react'
 
 const navItem = 'flex items-center gap-2.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors'
@@ -126,6 +127,9 @@ export default function Sidebar() {
         </NavLink>
         <NavLink to="/digests" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
           <Sparkles size={16} />Monthly Digest
+        </NavLink>
+        <NavLink to="/literature-review" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
+          <ScrollText size={16} />Literature Review
         </NavLink>
         <NavLink to="/collections" className={({ isActive }) => `${navItem} ${isActive ? activeClass : inactiveClass}`}>
           <FolderTree size={16} />Collections

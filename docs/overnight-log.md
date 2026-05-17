@@ -18,6 +18,26 @@ If any cycle uncovers something that wants more time, I'll slow down rather than
 
 ## Cycle log
 
+### Cycle 20 — Living literature review v1 — ✅ done
+
+**Goal:** Project-level whole-library synthesis — evergreen, not time-windowed. Researchers get a single page covering themes, methods, consensus, gaps, and reading recommendations for the entire corpus. Differs from Digest (which is "what's new in window X").
+
+**Built:**
+- `literature_reviews` table (id, project_id, version, title, content TEXT, cited_reference_ids JSONB, model_used, ref_count_at_generation, created_by, created_at). Version per project monotonically increases. Cascade on project_id.
+- `services/literature_review.py.generate()` selects up to 40 seed refs (starred first, then summary-bearing newest, then anything else), assembles a library overview (counts + top tags + source-type breakdown), and asks Alexandria for a 6-section markdown synthesis with inline `[id]` citations. Extracts cited ids by regex and persists alongside the content. Reuses the librarian's citation pattern from Cycle 13.
+- Three endpoints under `/projects/{id}/literature-review/`: GET latest, POST regenerate, GET history. All access-protected.
+- New `LiteratureReviewPage` rendering markdown via ReactMarkdown with citation linkification. Generate button, version metadata header (version, time-ago, model used, ref count at generation), collapsible version-history list. Sidebar nav entry added with ScrollText icon.
+
+**Critical review** (Claude + Gemini in parallel) caught two real bugs:
+
+1. **`.where(... if starred_ids else True)` is invalid in SQLAlchemy 2.x.** Passing a Python `True` to `.where()` raises in modern SQLAlchemy. Hit when no refs are starred, which is the common case. Fix: build the query unconditionally and only `.where()`-add the exclusion when `starred_ids` is non-empty. Both reviewers flagged.
+
+2. **Citation linkification dropped silently inside formatting nodes.** The original `components` override only handled `p` and `li`. Citations inside `## headers`, `**bold**`, `*italic*`, blockquotes — all of which the Alexandria prompt explicitly asks for in `### Theme name [12]` style — would render as plain `[12]` text. Both reviewers caught this. Fix: replaced with a recursive `linkifyCitations` walker that descends into any React element's children, finds strings, and splices in CitationLink elements with proper keys. Also extended the components override to h1-h4, strong, em, blockquote.
+
+**Side note from running instance:** logs showed 404s on `/projects/1/radar` and `/collections/tree?project_id=1`. Three users exist in the DB (`mike`, `m2`, `mike2`) and project 1 is owned by mike. The 404s are correct: the Cycle 19 access check refusing a non-owner. Working as intended.
+
+---
+
 ### Cycle 19 — Project access enforcement — ✅ done (expanded after review)
 
 **Goal:** Close the standing security gap: any authenticated user could read/modify any reference and call any project endpoint, because none of the single-ref or per-project endpoints checked ownership. Memory has flagged this since Cycle 1.

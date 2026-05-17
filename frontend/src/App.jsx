@@ -18,6 +18,7 @@ import CollectionsPage from './pages/CollectionsPage'
 import HowItWorks from './pages/HowItWorks'
 import TagBrowser from './pages/TagBrowser'
 import ComparePage from './pages/ComparePage'
+import LiteratureReviewPage from './pages/LiteratureReviewPage'
 
 function PrivateRoute({ children }) {
   const { user } = useAuth()
@@ -55,6 +56,7 @@ export default function App() {
             <Route path="how-it-works" element={<HowItWorks />} />
             <Route path="tags" element={<TagBrowser />} />
             <Route path="compare" element={<ComparePage />} />
+            <Route path="literature-review" element={<LiteratureReviewPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
